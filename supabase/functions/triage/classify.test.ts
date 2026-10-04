@@ -3,7 +3,7 @@
 // TypeScript files directly by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyTicket, type MessagesClient } from './classify.ts'
+import { classifyTicket, SYSTEM_PROMPT, type MessagesClient } from './classify.ts'
 
 const reply = (text: string, stop_reason = 'end_turn'): MessagesClient => ({
   messages: { create: async () => ({ stop_reason, content: [{ type: 'text', text }] }) },
@@ -70,4 +70,9 @@ test('success: category and priority returned', async () => {
   assert.deepEqual(await classifyTicket(reply('{"category":"billing","priority":"urgent"}'), 's', 'b'), {
     classifier: 'claude-haiku-4-5', category: 'billing', priority: 'urgent',
   })
+})
+
+test('prompt names the invented product, not a real one', () => {
+  assert.match(SYSTEM_PROMPT, /\bBrannoway\b/)
+  assert.doesNotMatch(SYSTEM_PROMPT, /tallybook/i)
 })

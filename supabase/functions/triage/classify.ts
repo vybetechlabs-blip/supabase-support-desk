@@ -26,7 +26,7 @@ export type MessagesClient = {
 
 export const MODEL = 'claude-haiku-4-5'
 
-export const SYSTEM_PROMPT = `You triage support tickets for Tallybook, an invoicing app for small businesses.
+export const SYSTEM_PROMPT = `You triage support tickets for Brannoway, an invoicing app for small businesses.
 Pick the single best category and a priority.
 
 Categories: account (sign-in, passwords, 2FA, account changes), billing (charges, refunds, plans, receipts),

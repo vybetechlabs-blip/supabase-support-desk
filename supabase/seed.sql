@@ -55,7 +55,7 @@ from auth.users u
 where u.id = p.id and u.email like '%.agent@example.com';
 
 -- ---------------------------------------------------------------------------
--- Tickets. The product is a fictional invoicing app called "Tallybook".
+-- Tickets. The product is a fictional invoicing app called "Brannoway" (invented name).
 -- ---------------------------------------------------------------------------
 create temporary table seed_tickets (
   n int, customer text, subject text, body text, category text, priority text,
