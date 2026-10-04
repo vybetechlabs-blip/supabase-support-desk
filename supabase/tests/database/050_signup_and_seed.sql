@@ -1,6 +1,6 @@
 -- The allowed path for profile creation (the sign-up trigger) and seed sanity.
 begin;
-select plan(5);
+select plan(7);
 
 -- A client controls raw_user_meta_data at sign-up. Claiming "agent" there must not work.
 insert into auth.users (id, email, raw_user_meta_data, aud, role)
@@ -19,6 +19,19 @@ select results_eq(
   $$ select display_name from public.profiles where id = '00000000-0000-0000-0000-00000000a002' $$,
   $$ values ('noname'::text) $$,
   'display name falls back to the email local part'
+);
+
+-- The client controls user metadata at sign-up; an over-long name must not break sign-up.
+select lives_ok(
+  $$ insert into auth.users (id, email, raw_user_meta_data, aud, role)
+     values ('00000000-0000-0000-0000-00000000a003', 'longname@test.local',
+             jsonb_build_object('display_name', repeat('x', 150)), 'authenticated', 'authenticated') $$,
+  'sign-up succeeds with a 150-character display name'
+);
+select is(
+  (select char_length(display_name) from public.profiles where id = '00000000-0000-0000-0000-00000000a003'),
+  100,
+  'display name is cut to 100 characters'
 );
 
 -- Seed loaded (supabase/seed.sql).
