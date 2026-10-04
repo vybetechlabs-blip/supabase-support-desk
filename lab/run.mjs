@@ -1,7 +1,13 @@
 // Runs one lab scenario end to end on the LOCAL stack and records everything:
 //
-//   reset -> (bulk seed) -> break -> diagnose -> test (must FAIL)
-//         -> fix -> diagnose -> test (must PASS)
+//   reset -> (bulk seed) -> break -> diagnose -> by-hand SQL -> test (must FAIL)
+//         -> fix -> diagnose -> by-hand SQL -> test (must PASS)
+//
+// diagnose.mjs gathers evidence through the API (supabase-js, as the app does).
+// by-hand.sql is the SQL a reader runs in Studio's SQL editor, one step at a time;
+// lab/common/by-hand.mjs sends each step to Studio's own SQL endpoint. For scenarios
+// 3 and 4 the EXPLAIN steps are timed (1 warm-up + 7 runs), so both sets of numbers
+// come from the same database state.
 //
 //   npm run lab -- 1        (or 2, 3, 4, all)
 //
@@ -11,10 +17,10 @@ import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, readdirSync } from 'node:fs'
 
 const SCENARIOS = {
-  1: { dir: '01-policy-leak', bulk: false },
-  2: { dir: '02-blocked-reply', bulk: false },
-  3: { dir: '03-slow-ticket-list', bulk: true },
-  4: { dir: '04-slow-policy', bulk: true },
+  1: { dir: '01-policy-leak', bulk: false, timed: false },
+  2: { dir: '02-blocked-reply', bulk: false, timed: false },
+  3: { dir: '03-slow-ticket-list', bulk: true, timed: true },
+  4: { dir: '04-slow-policy', bulk: true, timed: true },
 }
 
 const arg = process.argv[2] ?? 'all'
@@ -35,7 +41,7 @@ function run(cmd, args) {
 
 let failures = 0
 for (const n of which) {
-  const { dir, bulk } = SCENARIOS[n]
+  const { dir, bulk, timed } = SCENARIOS[n]
   const base = `lab/${dir}`
   const log = []
   const say = (s) => {
@@ -64,11 +70,17 @@ for (const n of which) {
   step('Reload PostgREST config', 'node', ['scripts/sql.mjs', '-c', `"notify pgrst, 'reload config'"`])
   await new Promise((r) => setTimeout(r, 2000))
 
-  step('BREAK: reproduce the reported state', 'node', ['scripts/sql.mjs', `${base}/break.sql`])
+  const byHand = (when) =>
+    step(`BY HAND (${when}): by-hand.sql step by step through Studio's SQL endpoint${timed ? ', EXPLAIN steps timed (1 warm-up + 7 runs)' : ''}`,
+      'node', ['lab/common/by-hand.mjs', `${base}/by-hand.sql`, ...(timed ? ['--runs', '7'] : [])])
+
+  if (step('BREAK: reproduce the reported state', 'node', ['scripts/sql.mjs', `${base}/break.sql`]).code !== 0) throw new Error('break.sql failed')
   step('DIAGNOSE (before fix)', 'node', [`${base}/diagnose.mjs`])
+  byHand('before fix')
   const before = step('TEST (before fix, expected to FAIL)', 'npx', testArgs)
-  step('FIX: apply the fix migration', 'node', ['scripts/sql.mjs', `${base}/fix.sql`])
+  if (step('FIX: apply the fix migration', 'node', ['scripts/sql.mjs', `${base}/fix.sql`]).code !== 0) throw new Error('fix.sql failed')
   step('DIAGNOSE (after fix)', 'node', [`${base}/diagnose.mjs`])
+  byHand('after fix')
   const after = step('TEST (after fix, expected to PASS)', 'npx', testArgs)
 
   const ok = before.code !== 0 && after.code === 0

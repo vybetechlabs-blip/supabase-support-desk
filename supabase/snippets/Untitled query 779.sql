@@ -1,0 +1,1 @@
+select set_config('request.jwt.claims', json_build_object('sub', (select id from auth.users where email = 'dana@example.com'), 'role', 'authenticated')::text, true); set local role authenticated; select count(*) as internal_notes_visible from public.messages where is_internal

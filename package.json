@@ -12,7 +12,8 @@
     "test:db": "supabase db reset --local && supabase test db --local",
     "sql": "node scripts/sql.mjs",
     "embed:backfill": "node scripts/backfill-embeddings.mjs",
-    "lab": "node lab/run.mjs"
+    "lab": "node lab/run.mjs",
+    "by-hand": "node lab/common/by-hand.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
