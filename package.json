@@ -11,7 +11,8 @@
     "gen:types": "supabase gen types typescript --local --schema public > src/lib/database.types.ts",
     "test:db": "supabase db reset --local && supabase test db --local",
     "sql": "node scripts/sql.mjs",
-    "embed:backfill": "node scripts/backfill-embeddings.mjs"
+    "embed:backfill": "node scripts/backfill-embeddings.mjs",
+    "lab": "node lab/run.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
