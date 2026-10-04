@@ -363,6 +363,7 @@ Aggregate  (cost=8720.77..8720.79 rows=1 width=144) (actual time=12.116..12.120 
               Sort Method: top-N heapsort  Memory: 44kB
               ...
                           ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1461 width=93) (actual time=0.191..5.519 rows=2920 loops=1)
+                                Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (status = 'open'::text))
                                 Rows Removed by Filter: 47120
                                 Buffers: shared hit=1117
               ... (customer and assignee name lookups: Buffers: shared hit=2877)
@@ -381,6 +382,10 @@ Execution time (API), 7 runs (ms): 12.209, 13.108, 13.433, 13.817, 12.036, 12.70
   (2,877 buffers) and sorted them (`top-N heapsort`) only to keep 50.
 - Buffers: 3,994 pages touched for one screen of results: 1,117 for the scan
   (the table is 1,114 pages) and 2,877 for the name lookups.
+- The RLS part of the `Filter` line is not the cost: `(InitPlan 1).col1` and
+  `(InitPlan 2).col1` are `auth.uid()` and the role check, each computed once for
+  the whole statement and reused for every row. Scenario 4 shows what the same
+  filter costs when they are not.
 
 The work grows with the size of the whole table, not with the 50 rows on
 screen, which matches "a little slower every week". 13 ms at 50,040 rows is not
