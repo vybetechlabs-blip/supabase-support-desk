@@ -9,7 +9,7 @@
 -- cosine similarity. `<#>` returns the NEGATIVE inner product (the docs call it
 -- the fastest operator for normalized vectors), hence the minus sign.
 -- No vector index yet: at this data size an exact scan is fast and fully correct
--- with the status filter and RLS. See TROUBLESHOOTING.md / known issues for scale.
+-- with the status filter and RLS. Scale notes: README.md, "Limitations".
 
 create function public.similar_tickets(p_ticket_id bigint, p_match_count int default 5)
 returns table (id bigint, subject text, category text, resolution text, similarity double precision)
