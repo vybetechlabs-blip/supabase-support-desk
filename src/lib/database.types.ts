@@ -74,7 +74,11 @@ isOneToOne: false
             [_ in never]: never
           }
           Functions: {
-            [_ in never]: never
+            "similar_tickets":
+{ Args: { "p_match_count"?: number,"p_ticket_id": number }; Returns: {
+              "category": string,"id": number,"resolution": string,"similarity": number,"subject": string
+            }[]
+                           }
           }
           Enums: {
             [_ in never]: never

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase, STATUSES, CATEGORIES, PRIORITIES, type Profile, type Ticket, type TicketUpdate } from '../lib/supabase'
 import { useRealtime } from '../lib/realtime'
+import { triageTicket } from '../lib/triage'
+import { SimilarTickets } from './SimilarTickets'
 
-type TicketView = Ticket & {
+type TicketView = Omit<Ticket, 'embedding'> & {
   customer: { display_name: string } | null
   assignee: { display_name: string } | null
 }
@@ -26,7 +28,9 @@ export function TicketDetail({ ticketId, profile }: { ticketId: number; profile:
     const { data, error } = await supabase
       .from('tickets')
       .select(
-        '*, customer:profiles!tickets_customer_id_fkey(display_name), assignee:profiles!tickets_assignee_id_fkey(display_name)',
+        // Every column except the 384-number embedding, which the browser never needs.
+        'id, customer_id, subject, body, status, category, priority, assignee_id, resolution, triaged_at, created_at, updated_at,' +
+          ' customer:profiles!tickets_customer_id_fkey(display_name), assignee:profiles!tickets_assignee_id_fkey(display_name)',
       )
       .eq('id', ticketId)
       .maybeSingle()
@@ -100,6 +104,8 @@ export function TicketDetail({ ticketId, profile }: { ticketId: number; profile:
             profile={profile}
             onSaved={loadTicket}
           />
+          <TriageBox ticket={ticket} onDone={loadTicket} />
+          <SimilarTickets key={ticket.triaged_at ?? 'untriaged'} ticketId={ticket.id} hasEmbedding={!!ticket.triaged_at} />
         </aside>
       )}
     </section>
@@ -212,6 +218,35 @@ function AgentControls({ ticket, profile, onSaved }: { ticket: TicketView; profi
         }
       >
         Save changes
+      </button>
+    </div>
+  )
+}
+
+function TriageBox({ ticket, onDone }: { ticket: TicketView; onDone: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+
+  async function run() {
+    setBusy(true)
+    const r = await triageTicket(ticket.id, true)
+    setBusy(false)
+    if ('error' in r) setResult(`Triage failed: ${r.error}`)
+    else if (r.classifier === 'stub') setResult('Embedding stored. Classification is a stub (no ANTHROPIC_API_KEY): set category and priority by hand.')
+    else if (r.classifier === 'error') setResult(`Embedding stored. Classification failed (${r.note ?? 'unknown error'}).`)
+    else setResult(`Classified by ${r.classifier}: ${r.category ?? '?'} / ${r.priority ?? '?'}`)
+    onDone()
+  }
+
+  return (
+    <div className="card">
+      <h2>Triage</h2>
+      <p className="muted">
+        {ticket.triaged_at ? `Triaged ${new Date(ticket.triaged_at).toLocaleString()}` : 'Not triaged yet.'}
+      </p>
+      {result && <p>{result}</p>}
+      <button className="secondary" onClick={run} disabled={busy}>
+        {busy ? 'Running…' : ticket.triaged_at ? 'Re-run triage' : 'Run triage'}
       </button>
     </div>
   )

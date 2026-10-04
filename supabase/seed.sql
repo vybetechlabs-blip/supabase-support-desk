@@ -105,10 +105,11 @@ insert into seed_tickets values
 (39,'june@example.com','Webhook signatures do not verify','The signature header on your webhooks never matches what we compute.','integration','high','resolved','ben.agent@example.com','June, the signature is computed over the raw request body. Your framework parses JSON first and re-serializes it, which changes the bytes. Verify against the raw body.','Using the raw body fixed it.',null,'Webhook signature mismatch because the receiver verified a re-serialized JSON body. Verifying against the raw request body fixed it.',7),
 (40,'kai@example.com','Two-factor setup QR code will not scan','The QR code on the two-factor setup page will not scan in my authenticator app.','account','normal','resolved','ava.agent@example.com','Kai, use the "enter key manually" link under the QR code and type the setup key into your app. Some apps struggle with the QR on high-contrast mode.','Manual key worked.',null,'QR code would not scan with high-contrast mode on; entering the setup key manually worked.',5);
 
-insert into public.tickets (customer_id, subject, body, status, category, priority, assignee_id, resolution, triaged_at, created_at, updated_at)
+-- Category and priority are as a human agent set them. Embeddings are not seeded:
+-- run `npm run embed:backfill` (calls the triage Edge Function) after a reset.
+insert into public.tickets (customer_id, subject, body, status, category, priority, assignee_id, resolution, created_at, updated_at)
 select
   cu.id, s.subject, s.body, s.status, s.category, s.priority, ag.id, s.resolution,
-  now() - make_interval(days => s.age_days),
   now() - make_interval(days => s.age_days),
   now() - make_interval(days => s.age_days)
 from seed_tickets s
