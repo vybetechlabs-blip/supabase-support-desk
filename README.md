@@ -40,7 +40,25 @@ local stack), a new ticket arrives classified. Observed on the local stack on
 suggestions work, but category and priority stay "untriaged" for an agent to set.
 The Triage box says so. There is no keyword-based guess.
 
-Classification is best effort: if the model call fails, the ticket keeps its
-embedding and the two fields stay empty. When an agent presses **Re-run triage**,
-the Triage box reports the failure. (This path follows from the code; it has not
-been triggered in testing.)
+**When the classifier call fails**, the ticket is still created and still gets
+its embedding. Observed on 2026-10-04 with the functions served using an invalid
+key (Anthropic answered `401 authentication_error`):
+
+- The customer's new ticket was created and opened normally; the customer sees
+  nothing about the failure.
+- The function answered 200 with `classifier: "error"` and
+  `note: "Anthropic API 401"`. The ticket got its 384-dimension embedding, its
+  category and priority stayed empty, and it was marked triaged.
+- Similar-ticket suggestions worked, because they only need the embedding.
+- An agent's **Re-run triage** showed "Embedding stored. Classification failed
+  (Anthropic API 401)." After the normal key was restored, the same button
+  classified the ticket.
+
+Nothing retries automatically: a ticket triaged during an outage keeps empty
+fields until an agent sets them or presses **Re-run triage**.
+
+Tests for this path: `npm run test:unit` (the classification step with fake
+clients: API error, network error, refusal, unusable output) and
+`npm run check:triage-failure` (end to end against a functions server started
+with an invalid key; instructions at the top of
+`scripts/check-triage-failure.mjs`).
