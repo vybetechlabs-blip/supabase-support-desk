@@ -38,3 +38,10 @@ lab/out/
 # repeats it at the root so it stays excluded even if that file changes.
 supabase/.temp/
 supabase/.branches/
+
+# Lab evidence logs are committed on purpose (TROUBLESHOOTING.md quotes them);
+# the *.log rule above would otherwise exclude them.
+!lab/evidence/**/*.log
+
+# Studio's SQL editor autosaves snippets here; they are scratch work.
+supabase/snippets/

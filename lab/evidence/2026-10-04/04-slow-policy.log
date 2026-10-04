@@ -1,0 +1,321 @@
+# Lab scenario 4: 04-slow-policy  (2026-10-04T04:33:47.954Z)
+
+##### Reset local database
+$ npx supabase db reset --local
+(exit 0)
+
+##### Load 50,000 lab tickets
+$ node scripts/sql.mjs lab/common/bulk-seed.sql
+┌─────────┬─────────┐
+│ (index) │ setseed │
+├─────────┼─────────┤
+│ 0       │ ''      │
+└─────────┴─────────┘
+INSERT 1000
+(0 rows)
+INSERT 50000
+ANALYZE
+ANALYZE
+┌─────────┬───────────────┬────────┬─────────┬──────────┐
+│ (index) │ tickets_total │ open   │ pending │ resolved │
+├─────────┼───────────────┼────────┼─────────┼──────────┤
+│ 0       │ '50040'       │ '2920' │ '2974'  │ '44146'  │
+└─────────┴───────────────┴────────┴─────────┴──────────┘
+(exit 0)
+
+##### Enable API query plans (local lab only)
+$ node scripts/sql.mjs -c "alter role authenticator in database postgres set pgrst.db_plan_enabled to 'true'"
+ALTER ROLE
+(exit 0)
+
+##### Reload PostgREST config
+$ node scripts/sql.mjs -c "notify pgrst, 'reload config'"
+NOTIFY
+(exit 0)
+
+##### BREAK: reproduce the reported state
+$ node scripts/sql.mjs lab/04-slow-policy/break.sql
+DROP POLICY
+CREATE POLICY
+(exit 0)
+
+##### DIAGNOSE (before fix)
+$ node lab/04-slow-policy/diagnose.mjs
+
+=== Same question in the SQL editor (role postgres, RLS bypassed) ===
+Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=5.239..5.240 rows=1 loops=1)
+  Buffers: shared hit=1114
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.009..4.971 rows=7220 loops=1)
+        Filter: (category = 'billing'::text)
+        Rows Removed by Filter: 42820
+        Buffers: shared hit=1114
+Planning Time: 0.051 ms
+Execution Time: 5.264 ms
+Execution Time over 7 runs (ms): 5.264, 5.517, 5.972, 5.416, 5.46, 5.588, 5.389
+median: 5.46 ms
+
+=== From the app as agent ava.agent@example.com (API request, RLS applies) ===
+API count result: 7220
+Aggregate  (cost=15512.97..15512.99 rows=1 width=144) (actual time=159.121..159.122 rows=1 loops=1)
+  Buffers: shared hit=22779
+  InitPlan 1
+    ->  Aggregate  (cost=15506.52..15506.53 rows=1 width=8) (actual time=158.962..158.963 rows=1 loops=1)
+          Buffers: shared hit=22774
+          ->  Seq Scan on tickets tickets_1  (cost=0.00..15500.50 rows=2407 width=0) (actual time=0.111..157.834 rows=7220 loops=1)
+                Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
+                Rows Removed by Filter: 42820
+                Buffers: shared hit=22774
+  ->  Limit  (cost=0.00..6.44 rows=1 width=8) (actual time=0.149..0.150 rows=1 loops=1)
+        Buffers: shared hit=5
+        ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2407 width=8) (actual time=0.148..0.148 rows=1 loops=1)
+              Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
+              Rows Removed by Filter: 5
+              Buffers: shared hit=5
+Planning Time: 0.248 ms
+Execution Time: 159.183 ms
+
+Execution Time over 7 runs (ms): 159.183, 160.756, 146.081, 147.166, 150.391, 150.374, 150.148
+median: 150.374 ms
+
+=== Policy on public.tickets for SELECT (pg_policies) ===
+tickets: customers read own, agents read all
+  USING ((customer_id = auth.uid()) OR private.is_agent())
+
+=== How many times does private.is_agent() run for ONE count, as the agent? ===
+{ rows_counted: 7220, is_agent_calls: 7220 }
+(exit 0)
+
+##### BY HAND (before fix): by-hand.sql step by step through Studio's SQL endpoint, EXPLAIN steps timed (1 warm-up + 7 runs)
+$ node lab/common/by-hand.mjs lab/04-slow-policy/by-hand.sql --runs 7
+by hand: lab/04-slow-policy/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
+
+--- Step 1: the count as the table owner (the SQL editor's default; RLS bypassed)
+Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=6.406..6.408 rows=1 loops=1)
+  Buffers: shared hit=1114
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.011..6.057 rows=7220 loops=1)
+        Filter: (category = 'billing'::text)
+        Rows Removed by Filter: 42820
+        Buffers: shared hit=1114
+Planning:
+  Buffers: shared hit=121
+Planning Time: 0.345 ms
+Execution Time: 6.590 ms
+Execution Time over 7 runs after 1 warm-up (ms): 6.59, 6.263, 6.134, 6.308, 6.381, 6.189, 6.497
+median: 6.308 ms
+
+--- Step 2: the same count as ava.agent@example.com (agent), with minimal JWT claims
+Aggregate  (cost=15506.52..15506.53 rows=1 width=8) (actual time=84.976..84.977 rows=1 loops=1)
+  Buffers: shared hit=22831
+  ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2407 width=0) (actual time=0.332..83.968 rows=7220 loops=1)
+        Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
+        Rows Removed by Filter: 42820
+        Buffers: shared hit=22831
+Planning:
+  Buffers: shared hit=163
+Planning Time: 0.393 ms
+Execution Time: 85.076 ms
+Execution Time over 7 runs after 1 warm-up (ms): 85.076, 86.279, 85.747, 88.898, 85.943, 89.213, 85.269
+median: 85.943 ms
+
+--- Step 3: the same count with claims the size of a real session token.
+Aggregate  (cost=15506.52..15506.53 rows=1 width=8) (actual time=189.380..189.380 rows=1 loops=1)
+  Buffers: shared hit=22831
+  ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2407 width=0) (actual time=0.464..187.890 rows=7220 loops=1)
+        Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
+        Rows Removed by Filter: 42820
+        Buffers: shared hit=22831
+Planning:
+  Buffers: shared hit=163
+Planning Time: 0.496 ms
+Execution Time: 189.519 ms
+Execution Time over 7 runs after 1 warm-up (ms): 189.519, 148.704, 148.322, 151.015, 156.427, 157.039, 150.194
+median: 151.015 ms
+
+--- Step 4: as the agent, how many times does private.is_agent() run for that one count?
+┌─────────┬────────────────┐
+│ (index) │ is_agent_calls │
+├─────────┼────────────────┤
+│ 0       │ '7220'         │
+└─────────┴────────────────┘
+
+--- Step 5: the select policy on tickets
+┌─────────┬────────────────────────────────────────────────┬──────────────────────────────────────────────────────┐
+│ (index) │ policyname                                     │ qual                                                 │
+├─────────┼────────────────────────────────────────────────┼──────────────────────────────────────────────────────┤
+│ 0       │ 'tickets: customers read own, agents read all' │ '((customer_id = auth.uid()) OR private.is_agent())' │
+└─────────┴────────────────────────────────────────────────┴──────────────────────────────────────────────────────┘
+(exit 0)
+
+##### TEST (before fix, expected to FAIL)
+$ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/04-slow-policy/test.sql
+/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
+/AI_WORK/Projects/supabase-support-desk/lab/04-slow-policy/test.sql .................... 
+# Failed test 3: "private.is_agent() runs once per statement, not once per row"
+#     '7220'
+#         <=
+#     '2'
+# Looks like you failed 1 test of 3
+Failed 1/3 subtests 
+
+Test Summary Report
+-------------------
+/AI_WORK/Projects/supabase-support-desk/lab/04-slow-policy/test.sql                  (Wstat: 0 Tests: 3 Failed: 1)
+  Failed test:  3
+Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.00 sys +  0.02 cusr  0.00 csys =  0.04 CPU)
+Result: FAIL
+Connecting to local database...
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  schema "tests" does not exist, skipping
+error running container: exit 1
+(exit 1)
+
+##### FIX: apply the fix migration
+$ node scripts/sql.mjs lab/04-slow-policy/fix.sql
+DROP POLICY
+CREATE POLICY
+(exit 0)
+
+##### DIAGNOSE (after fix)
+$ node lab/04-slow-policy/diagnose.mjs
+
+=== Same question in the SQL editor (role postgres, RLS bypassed) ===
+Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=5.456..5.457 rows=1 loops=1)
+  Buffers: shared hit=1114
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.008..5.164 rows=7220 loops=1)
+        Filter: (category = 'billing'::text)
+        Rows Removed by Filter: 42820
+        Buffers: shared hit=1114
+Planning Time: 0.045 ms
+Execution Time: 5.480 ms
+Execution Time over 7 runs (ms): 5.48, 5.939, 5.328, 5.453, 5.356, 5.304, 5.084
+median: 5.356 ms
+
+=== From the app as agent ava.agent@example.com (API request, RLS applies) ===
+API count result: 7220
+Aggregate  (cost=1874.73..1874.75 rows=1 width=144) (actual time=6.618..6.621 rows=1 loops=1)
+  Buffers: shared hit=1122
+  InitPlan 3
+    ->  Aggregate  (cost=1873.91..1873.92 rows=1 width=8) (actual time=6.425..6.426 rows=1 loops=1)
+          Buffers: shared hit=1117
+          InitPlan 1
+            ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.010..0.011 rows=1 loops=1)
+          InitPlan 2
+            ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.107..0.107 rows=1 loops=1)
+                  Buffers: shared hit=3
+          ->  Seq Scan on tickets tickets_1  (cost=0.00..1864.60 rows=3606 width=0) (actual time=0.123..6.126 rows=7220 loops=1)
+                Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (category = 'billing'::text))
+                Rows Removed by Filter: 42820
+                Buffers: shared hit=1117
+  ->  Limit  (cost=0.29..0.81 rows=1 width=8) (actual time=0.183..0.185 rows=1 loops=1)
+        Buffers: shared hit=5
+        InitPlan 4
+          ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.018..0.019 rows=1 loops=1)
+        InitPlan 5
+          ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.152..0.153 rows=1 loops=1)
+                Buffers: shared hit=3
+        ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3606 width=8) (actual time=0.182..0.182 rows=1 loops=1)
+              Filter: (((customer_id = (InitPlan 4).col1) OR (InitPlan 5).col1) AND (category = 'billing'::text))
+              Rows Removed by Filter: 5
+              Buffers: shared hit=5
+Planning Time: 0.322 ms
+Execution Time: 6.672 ms
+
+Execution Time over 7 runs (ms): 6.672, 6.818, 6.214, 6.614, 6.192, 5.981, 6.348
+median: 6.348 ms
+
+=== Policy on public.tickets for SELECT (pg_policies) ===
+tickets: customers read own, agents read all
+  USING ((customer_id = ( SELECT auth.uid() AS uid)) OR ( SELECT private.is_agent() AS is_agent))
+
+=== How many times does private.is_agent() run for ONE count, as the agent? ===
+{ rows_counted: 7220, is_agent_calls: 1 }
+(exit 0)
+
+##### BY HAND (after fix): by-hand.sql step by step through Studio's SQL endpoint, EXPLAIN steps timed (1 warm-up + 7 runs)
+$ node lab/common/by-hand.mjs lab/04-slow-policy/by-hand.sql --runs 7
+by hand: lab/04-slow-policy/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
+
+--- Step 1: the count as the table owner (the SQL editor's default; RLS bypassed)
+Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=6.258..6.259 rows=1 loops=1)
+  Buffers: shared hit=1114
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.010..5.973 rows=7220 loops=1)
+        Filter: (category = 'billing'::text)
+        Rows Removed by Filter: 42820
+        Buffers: shared hit=1114
+Planning:
+  Buffers: shared hit=121
+Planning Time: 0.304 ms
+Execution Time: 6.416 ms
+Execution Time over 7 runs after 1 warm-up (ms): 6.416, 6.375, 6.618, 6.479, 6.202, 6.11, 5.985
+median: 6.375 ms
+
+--- Step 2: the same count as ava.agent@example.com (agent), with minimal JWT claims
+Aggregate  (cost=1873.91..1873.92 rows=1 width=8) (actual time=12.013..12.015 rows=1 loops=1)
+  Buffers: shared hit=1175
+  InitPlan 1
+    ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.012..0.012 rows=1 loops=1)
+  InitPlan 2
+    ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.629..0.629 rows=1 loops=1)
+          Buffers: shared hit=61
+  ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3606 width=0) (actual time=0.659..11.537 rows=7220 loops=1)
+        Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (category = 'billing'::text))
+        Rows Removed by Filter: 42820
+        Buffers: shared hit=1175
+Planning:
+  Buffers: shared hit=160
+Planning Time: 0.635 ms
+Execution Time: 12.087 ms
+Execution Time over 7 runs after 1 warm-up (ms): 12.087, 7.447, 7.647, 6.836, 7.368, 7.429, 7.043
+median: 7.429 ms
+
+--- Step 3: the same count with claims the size of a real session token.
+Aggregate  (cost=1873.91..1873.92 rows=1 width=8) (actual time=7.558..7.559 rows=1 loops=1)
+  Buffers: shared hit=1175
+  InitPlan 1
+    ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.018..0.018 rows=1 loops=1)
+  InitPlan 2
+    ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.335..0.335 rows=1 loops=1)
+          Buffers: shared hit=61
+  ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3606 width=0) (actual time=0.361..7.258 rows=7220 loops=1)
+        Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (category = 'billing'::text))
+        Rows Removed by Filter: 42820
+        Buffers: shared hit=1175
+Planning:
+  Buffers: shared hit=160
+Planning Time: 0.415 ms
+Execution Time: 7.611 ms
+Execution Time over 7 runs after 1 warm-up (ms): 7.611, 7.638, 7.57, 7.66, 7.54, 7.176, 7.877
+median: 7.611 ms
+
+--- Step 4: as the agent, how many times does private.is_agent() run for that one count?
+┌─────────┬────────────────┐
+│ (index) │ is_agent_calls │
+├─────────┼────────────────┤
+│ 0       │ '1'            │
+└─────────┴────────────────┘
+
+--- Step 5: the select policy on tickets
+┌─────────┬────────────────────────────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ policyname                                     │ qual                                                                                        │
+├─────────┼────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 'tickets: customers read own, agents read all' │ '((customer_id = ( SELECT auth.uid() AS uid)) OR ( SELECT private.is_agent() AS is_agent))' │
+└─────────┴────────────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────┘
+(exit 0)
+
+##### TEST (after fix, expected to PASS)
+$ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/04-slow-policy/test.sql
+/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
+/AI_WORK/Projects/supabase-support-desk/lab/04-slow-policy/test.sql .................... ok
+All tests successful.
+Files=2, Tests=4,  0 wallclock secs ( 0.01 usr  0.01 sys +  0.02 cusr  0.00 csys =  0.04 CPU)
+Result: PASS
+Connecting to local database...
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to function tests.create_user(text,text,text)
+drop cascades to function tests.uid(text)
+drop cascades to function tests.authenticate_as(text)
+drop cascades to function tests.as_anon()
+(exit 0)
+
+# RESULT scenario 4: test before fix FAILED (expected), after fix PASSED -> OK

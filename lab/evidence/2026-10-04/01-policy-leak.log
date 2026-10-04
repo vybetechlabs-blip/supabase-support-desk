@@ -1,0 +1,144 @@
+# Lab scenario 1: 01-policy-leak  (2026-10-04T04:31:46.508Z)
+
+##### Reset local database
+$ npx supabase db reset --local
+(exit 0)
+
+##### Enable API query plans (local lab only)
+$ node scripts/sql.mjs -c "alter role authenticator in database postgres set pgrst.db_plan_enabled to 'true'"
+ALTER ROLE
+(exit 0)
+
+##### Reload PostgREST config
+$ node scripts/sql.mjs -c "notify pgrst, 'reload config'"
+NOTIFY
+(exit 0)
+
+##### BREAK: reproduce the reported state
+$ node scripts/sql.mjs lab/01-policy-leak/break.sql
+DROP POLICY
+CREATE POLICY
+(exit 0)
+
+##### DIAGNOSE (before fix)
+$ node lab/01-policy-leak/diagnose.mjs
+
+=== As customer dana@example.com (publishable key + her session): messages on her tickets ===
+rows returned: 12, of which is_internal = true: 3
+  LEAK? ticket 1, message 59: Corporate filter on the customer domain held our transactional sender.
+  LEAK? ticket 9, message 62: Plan cache refreshes at sign-in. If still greyed out after re-login, c
+  LEAK? ticket 17, message 67: Missing composite index on (workspace, status, created_at). Added.
+
+=== Direct question: can this customer select any internal note? ===
+count of is_internal rows visible to the customer: 3
+
+=== Select policies on public.messages (pg_policies) ===
+messages: ticket participants read  roles={authenticated}
+  USING (( SELECT private.is_agent() AS is_agent) OR (ticket_id IN ( SELECT tickets.id
+   FROM tickets
+  WHERE (tickets.customer_id = ( SELECT auth.uid() AS uid)))))
+(exit 0)
+
+##### BY HAND (before fix): by-hand.sql step by step through Studio's SQL endpoint
+$ node lab/common/by-hand.mjs lab/01-policy-leak/by-hand.sql
+by hand: lab/01-policy-leak/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
+
+--- Step 1: as dana@example.com (customer), count the internal notes she can read
+┌─────────┬────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ internal_notes_visible │ notes                                                                                                                                                           │
+├─────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 3                      │ 'ticket 1: Corporate filter on the customer domain  | ticket 9: Plan cache refreshes at sign-in. If stil | ticket 17: Missing composite index on (workspace, s' │
+└─────────┴────────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+--- Step 2: the select policy that decided it
+┌─────────┬──────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ policyname                           │ qual                                                                                                                                                              │
+├─────────┼──────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 'messages: ticket participants read' │ '(( SELECT private.is_agent() AS is_agent) OR (ticket_id IN ( SELECT tickets.id\n   FROM tickets\n  WHERE (tickets.customer_id = ( SELECT auth.uid() AS uid)))))' │
+└─────────┴──────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+(exit 0)
+
+##### TEST (before fix, expected to FAIL)
+$ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/01-policy-leak/test.sql
+/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
+/AI_WORK/Projects/supabase-support-desk/lab/01-policy-leak/test.sql .................... 
+# Failed test 1: "customer reads no internal notes at all"
+#     Unexpected records:
+#         (76)
+# Failed test 2: "customer reads only the public reply on their own ticket"
+#     Results differ beginning at row 2:
+#         have: ("internal note")
+#         want: NULL
+# Looks like you failed 2 tests of 3
+Failed 2/3 subtests 
+
+Test Summary Report
+-------------------
+/AI_WORK/Projects/supabase-support-desk/lab/01-policy-leak/test.sql                  (Wstat: 0 Tests: 3 Failed: 2)
+  Failed tests:  1-2
+Files=2, Tests=4,  1 wallclock secs ( 0.02 usr  0.01 sys +  0.01 cusr  0.01 csys =  0.05 CPU)
+Result: FAIL
+Connecting to local database...
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  schema "tests" does not exist, skipping
+error running container: exit 1
+(exit 1)
+
+##### FIX: apply the fix migration
+$ node scripts/sql.mjs lab/01-policy-leak/fix.sql
+DROP POLICY
+CREATE POLICY
+(exit 0)
+
+##### DIAGNOSE (after fix)
+$ node lab/01-policy-leak/diagnose.mjs
+
+=== As customer dana@example.com (publishable key + her session): messages on her tickets ===
+rows returned: 9, of which is_internal = true: 0
+
+=== Direct question: can this customer select any internal note? ===
+count of is_internal rows visible to the customer: 0
+
+=== Select policies on public.messages (pg_policies) ===
+messages: customers read own public, agents read all  roles={authenticated}
+  USING (( SELECT private.is_agent() AS is_agent) OR ((is_internal = false) AND (ticket_id IN ( SELECT tickets.id
+   FROM tickets
+  WHERE (tickets.customer_id = ( SELECT auth.uid() AS uid))))))
+(exit 0)
+
+##### BY HAND (after fix): by-hand.sql step by step through Studio's SQL endpoint
+$ node lab/common/by-hand.mjs lab/01-policy-leak/by-hand.sql
+by hand: lab/01-policy-leak/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
+
+--- Step 1: as dana@example.com (customer), count the internal notes she can read
+┌─────────┬────────────────────────┬───────┐
+│ (index) │ internal_notes_visible │ notes │
+├─────────┼────────────────────────┼───────┤
+│ 0       │ 0                      │ null  │
+└─────────┴────────────────────────┴───────┘
+
+--- Step 2: the select policy that decided it
+┌─────────┬────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ policyname                                             │ qual                                                                                                                                                                                          │
+├─────────┼────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 'messages: customers read own public, agents read all' │ '(( SELECT private.is_agent() AS is_agent) OR ((is_internal = false) AND (ticket_id IN ( SELECT tickets.id\n   FROM tickets\n  WHERE (tickets.customer_id = ( SELECT auth.uid() AS uid))))))' │
+└─────────┴────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+(exit 0)
+
+##### TEST (after fix, expected to PASS)
+$ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/01-policy-leak/test.sql
+/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
+/AI_WORK/Projects/supabase-support-desk/lab/01-policy-leak/test.sql .................... ok
+All tests successful.
+Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.00 sys +  0.01 cusr  0.00 csys =  0.03 CPU)
+Result: PASS
+Connecting to local database...
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to function tests.create_user(text,text,text)
+drop cascades to function tests.uid(text)
+drop cascades to function tests.authenticate_as(text)
+drop cascades to function tests.as_anon()
+(exit 0)
+
+# RESULT scenario 1: test before fix FAILED (expected), after fix PASSED -> OK

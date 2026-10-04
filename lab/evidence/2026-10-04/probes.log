@@ -1,0 +1,12 @@
+1. Seq Scan buffers for scenario 4 step 2, by session and run
+  session A, run 1: Buffers: shared hit=1173
+  session A, run 2: Buffers: shared hit=1117
+  session A, run 3: Buffers: shared hit=1117
+  session B (new connection), run 1: Buffers: shared hit=1173
+  session B (new connection), run 2: Buffers: shared hit=1117
+  table heap pages: 1114
+
+2. JWT claims of a real session for ava.agent@example.com
+  claim keys: iss, sub, aud, exp, iat, email, phone, app_metadata, user_metadata, role, aal, amr, session_id, is_anonymous
+  size: 460 bytes
+  minimal claims used in by-hand step 2: 69 bytes

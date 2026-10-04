@@ -1,0 +1,190 @@
+# Lab scenario 2: 02-blocked-reply  (2026-10-04T04:32:26.488Z)
+
+##### Reset local database
+$ npx supabase db reset --local
+(exit 0)
+
+##### Enable API query plans (local lab only)
+$ node scripts/sql.mjs -c "alter role authenticator in database postgres set pgrst.db_plan_enabled to 'true'"
+ALTER ROLE
+(exit 0)
+
+##### Reload PostgREST config
+$ node scripts/sql.mjs -c "notify pgrst, 'reload config'"
+NOTIFY
+(exit 0)
+
+##### BREAK: reproduce the reported state
+$ node scripts/sql.mjs lab/02-blocked-reply/break.sql
+DROP POLICY
+CREATE POLICY
+(exit 0)
+
+##### DIAGNOSE (before fix)
+$ node lab/02-blocked-reply/diagnose.mjs
+customer dana@example.com (9e559e4a-eb37-4537-ac30-bb7a1de5be2a) replies on her own ticket #9 "Upgrade did not unlock recurring invoices" (assignee_id: a8ae1741-5a7a-4897-a39c-42e52f485fa6)
+
+=== 1. What the client receives ===
+HTTP 403 Forbidden
+{
+  "code": "42501",
+  "details": null,
+  "hint": null,
+  "message": "new row violates row-level security policy for table \"messages\""
+}
+
+=== 2. Is it a missing table privilege? (that would say "permission denied for table") ===
+{ authenticated_can_insert: true }
+
+=== 3. INSERT policies on public.messages (pg_policies) ===
+messages: reply on tickets you work on  PERMISSIVE roles={authenticated}
+  WITH CHECK ((author_id = ( SELECT auth.uid() AS uid)) AND (( SELECT private.is_agent() AS is_agent) OR ((is_internal = false) AND (ticket_id IN ( SELECT tickets.id
+   FROM tickets
+  WHERE (tickets.assignee_id = ( SELECT auth.uid() AS uid)))))))
+
+=== 4. Each condition of the WITH CHECK, evaluated as the customer for the row she sent ===
+{
+  author_is_caller: true,
+  not_internal: true,
+  caller_is_agent: false,
+  ticket_assigned_to_caller: false,
+  ticket_owned_by_caller: true
+}
+(exit 0)
+
+##### BY HAND (before fix): by-hand.sql step by step through Studio's SQL endpoint
+$ node lab/common/by-hand.mjs lab/02-blocked-reply/by-hand.sql
+by hand: lab/02-blocked-reply/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
+
+--- Step 1: reproduce the error, as dana@example.com replying on her own ticket
+ERROR:  42501: new row violates row-level security policy for table "messages"
+
+--- Step 2: is it a missing table privilege? (that error says "permission denied for table")
+┌─────────┬──────────────────────────┐
+│ (index) │ authenticated_can_insert │
+├─────────┼──────────────────────────┤
+│ 0       │ true                     │
+└─────────┴──────────────────────────┘
+
+--- Step 3: the insert policies and their WITH CHECK expressions
+┌─────────┬──────────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ policyname                               │ with_check                                                                                                                                                                                                                                    │
+├─────────┼──────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 'messages: reply on tickets you work on' │ '((author_id = ( SELECT auth.uid() AS uid)) AND (( SELECT private.is_agent() AS is_agent) OR ((is_internal = false) AND (ticket_id IN ( SELECT tickets.id\n   FROM tickets\n  WHERE (tickets.assignee_id = ( SELECT auth.uid() AS uid)))))))' │
+└─────────┴──────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+--- Step 4: as dana@example.com, evaluate each condition of the customer branch for ticket 9
+┌─────────┬─────────────────┬───────────────────────────┬────────────────────────┐
+│ (index) │ caller_is_agent │ ticket_assigned_to_caller │ ticket_owned_by_caller │
+├─────────┼─────────────────┼───────────────────────────┼────────────────────────┤
+│ 0       │ false           │ false                     │ true                   │
+└─────────┴─────────────────┴───────────────────────────┴────────────────────────┘
+(exit 0)
+
+##### TEST (before fix, expected to FAIL)
+$ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/02-blocked-reply/test.sql
+/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
+/AI_WORK/Projects/supabase-support-desk/lab/02-blocked-reply/test.sql .................. 
+# Failed test 1: "customer can reply on their own (unassigned) ticket"
+#     died: 42501: new row violates row-level security policy for table "messages"
+#         CONTEXT:
+#             SQL statement " insert into public.messages (ticket_id, body) values ((select id from fx where name = 'own'), 'customer reply') "
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+# Looks like you failed 1 test of 4
+Failed 1/4 subtests 
+
+Test Summary Report
+-------------------
+/AI_WORK/Projects/supabase-support-desk/lab/02-blocked-reply/test.sql                (Wstat: 0 Tests: 4 Failed: 1)
+  Failed test:  1
+Files=2, Tests=5,  0 wallclock secs ( 0.03 usr  0.00 sys +  0.01 cusr  0.01 csys =  0.05 CPU)
+Result: FAIL
+Connecting to local database...
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  schema "tests" does not exist, skipping
+error running container: exit 1
+(exit 1)
+
+##### FIX: apply the fix migration
+$ node scripts/sql.mjs lab/02-blocked-reply/fix.sql
+DROP POLICY
+CREATE POLICY
+(exit 0)
+
+##### DIAGNOSE (after fix)
+$ node lab/02-blocked-reply/diagnose.mjs
+customer dana@example.com (9e559e4a-eb37-4537-ac30-bb7a1de5be2a) replies on her own ticket #9 "Upgrade did not unlock recurring invoices" (assignee_id: a8ae1741-5a7a-4897-a39c-42e52f485fa6)
+
+=== 1. What the client receives ===
+HTTP 201 Created
+null
+
+=== 2. Is it a missing table privilege? (that would say "permission denied for table") ===
+{ authenticated_can_insert: true }
+
+=== 3. INSERT policies on public.messages (pg_policies) ===
+messages: agents post anywhere, customers reply on own tickets  PERMISSIVE roles={authenticated}
+  WITH CHECK ((author_id = ( SELECT auth.uid() AS uid)) AND (( SELECT private.is_agent() AS is_agent) OR ((is_internal = false) AND (ticket_id IN ( SELECT tickets.id
+   FROM tickets
+  WHERE (tickets.customer_id = ( SELECT auth.uid() AS uid)))))))
+
+=== 4. Each condition of the WITH CHECK, evaluated as the customer for the row she sent ===
+{
+  author_is_caller: true,
+  not_internal: true,
+  caller_is_agent: false,
+  ticket_assigned_to_caller: false,
+  ticket_owned_by_caller: true
+}
+(exit 0)
+
+##### BY HAND (after fix): by-hand.sql step by step through Studio's SQL endpoint
+$ node lab/common/by-hand.mjs lab/02-blocked-reply/by-hand.sql
+by hand: lab/02-blocked-reply/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
+
+--- Step 1: reproduce the error, as dana@example.com replying on her own ticket
+┌─────────┬────┐
+│ (index) │ id │
+├─────────┼────┤
+│ 0       │ 82 │
+└─────────┴────┘
+
+--- Step 2: is it a missing table privilege? (that error says "permission denied for table")
+┌─────────┬──────────────────────────┐
+│ (index) │ authenticated_can_insert │
+├─────────┼──────────────────────────┤
+│ 0       │ true                     │
+└─────────┴──────────────────────────┘
+
+--- Step 3: the insert policies and their WITH CHECK expressions
+┌─────────┬──────────────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ policyname                                                       │ with_check                                                                                                                                                                                                                                    │
+├─────────┼──────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 'messages: agents post anywhere, customers reply on own tickets' │ '((author_id = ( SELECT auth.uid() AS uid)) AND (( SELECT private.is_agent() AS is_agent) OR ((is_internal = false) AND (ticket_id IN ( SELECT tickets.id\n   FROM tickets\n  WHERE (tickets.customer_id = ( SELECT auth.uid() AS uid)))))))' │
+└─────────┴──────────────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+--- Step 4: as dana@example.com, evaluate each condition of the customer branch for ticket 9
+┌─────────┬─────────────────┬───────────────────────────┬────────────────────────┐
+│ (index) │ caller_is_agent │ ticket_assigned_to_caller │ ticket_owned_by_caller │
+├─────────┼─────────────────┼───────────────────────────┼────────────────────────┤
+│ 0       │ false           │ false                     │ true                   │
+└─────────┴─────────────────┴───────────────────────────┴────────────────────────┘
+(exit 0)
+
+##### TEST (after fix, expected to PASS)
+$ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/02-blocked-reply/test.sql
+/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
+/AI_WORK/Projects/supabase-support-desk/lab/02-blocked-reply/test.sql .................. ok
+All tests successful.
+Files=2, Tests=5,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.01 cusr  0.01 csys =  0.05 CPU)
+Result: PASS
+Connecting to local database...
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to function tests.create_user(text,text,text)
+drop cascades to function tests.uid(text)
+drop cascades to function tests.authenticate_as(text)
+drop cascades to function tests.as_anon()
+(exit 0)
+
+# RESULT scenario 2: test before fix FAILED (expected), after fix PASSED -> OK

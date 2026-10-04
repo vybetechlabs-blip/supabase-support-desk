@@ -1,0 +1,304 @@
+# Lab scenario 3: 03-slow-ticket-list  (2026-10-04T04:33:06.150Z)
+
+##### Reset local database
+$ npx supabase db reset --local
+(exit 0)
+
+##### Load 50,000 lab tickets
+$ node scripts/sql.mjs lab/common/bulk-seed.sql
+┌─────────┬─────────┐
+│ (index) │ setseed │
+├─────────┼─────────┤
+│ 0       │ ''      │
+└─────────┴─────────┘
+INSERT 1000
+(0 rows)
+INSERT 50000
+ANALYZE
+ANALYZE
+┌─────────┬───────────────┬────────┬─────────┬──────────┐
+│ (index) │ tickets_total │ open   │ pending │ resolved │
+├─────────┼───────────────┼────────┼─────────┼──────────┤
+│ 0       │ '50040'       │ '2920' │ '2974'  │ '44146'  │
+└─────────┴───────────────┴────────┴─────────┴──────────┘
+(exit 0)
+
+##### Enable API query plans (local lab only)
+$ node scripts/sql.mjs -c "alter role authenticator in database postgres set pgrst.db_plan_enabled to 'true'"
+ALTER ROLE
+(exit 0)
+
+##### Reload PostgREST config
+$ node scripts/sql.mjs -c "notify pgrst, 'reload config'"
+NOTIFY
+(exit 0)
+
+##### BREAK: reproduce the reported state
+$ node scripts/sql.mjs lab/03-slow-ticket-list/break.sql
+DROP INDEX
+ANALYZE
+(exit 0)
+
+##### DIAGNOSE (before fix)
+$ node lab/03-slow-ticket-list/diagnose.mjs
+
+=== Table size and indexes on public.tickets ===
+{ rows: 50040, heap: '8912 kB' }
+  CREATE INDEX tickets_assignee_id_idx ON public.tickets USING btree (assignee_id)
+  CREATE INDEX tickets_customer_id_idx ON public.tickets USING btree (customer_id)
+  CREATE UNIQUE INDEX tickets_pkey ON public.tickets USING btree (id)
+
+=== Agent list request through the API, EXPLAIN (ANALYZE, BUFFERS) ===
+Aggregate  (cost=8756.67..8756.69 rows=1 width=144) (actual time=12.377..12.382 rows=1 loops=1)
+  Buffers: shared hit=3994
+  ->  Limit  (cost=8756.29..8756.42 rows=50 width=125) (actual time=12.157..12.171 rows=50 loops=1)
+        Buffers: shared hit=3994
+        InitPlan 1
+          ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.024..0.024 rows=1 loops=1)
+        InitPlan 2
+          ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.142..0.142 rows=1 loops=1)
+                Buffers: shared hit=3
+        ->  Sort  (cost=8756.00..8759.69 rows=1476 width=125) (actual time=12.156..12.164 rows=50 loops=1)
+              Sort Key: tickets.created_at DESC
+              Sort Method: top-N heapsort  Memory: 44kB
+              Buffers: shared hit=3994
+              ->  Nested Loop Left Join  (cost=1.16..8706.97 rows=1476 width=125) (actual time=0.312..11.493 rows=2920 loops=1)
+                    Buffers: shared hit=3994
+                    ->  Nested Loop Left Join  (cost=0.58..8613.55 rows=1476 width=117) (actual time=0.306..9.018 rows=2920 loops=1)
+                          Buffers: shared hit=3994
+                          ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1476 width=93) (actual time=0.183..5.471 rows=2920 loops=1)
+                                Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (status = 'open'::text))
+                                Rows Removed by Filter: 47120
+                                Buffers: shared hit=1117
+                          ->  Memoize  (cost=0.58..8.61 rows=1 width=40) (actual time=0.001..0.001 rows=1 loops=2920)
+                                Cache Key: tickets.customer_id
+                                Cache Mode: binary
+                                Hits: 1962  Misses: 958  Evictions: 0  Overflows: 0  Memory Usage: 141kB
+                                Buffers: shared hit=2877
+                                ->  Subquery Scan on tickets_customer_1  (cost=0.57..8.60 rows=1 width=40) (actual time=0.002..0.002 rows=1 loops=958)
+                                      Buffers: shared hit=2877
+                                      ->  Limit  (cost=0.57..8.59 rows=1 width=16) (actual time=0.002..0.002 rows=1 loops=958)
+                                            Buffers: shared hit=2877
+                                            InitPlan 3
+                                              ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.008..0.009 rows=1 loops=1)
+                                            InitPlan 4
+                                              ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.102..0.102 rows=1 loops=1)
+                                                    Buffers: shared hit=3
+                                            ->  Index Scan using profiles_pkey on profiles profiles_1  (cost=0.28..8.30 rows=1 width=16) (actual time=0.002..0.002 rows=1 loops=958)
+                                                  Index Cond: (id = tickets.customer_id)
+                                                  Filter: ((id = (InitPlan 3).col1) OR (role = 'agent'::text) OR (InitPlan 4).col1)
+                                                  Buffers: shared hit=2877
+                    ->  Memoize  (cost=0.58..8.61 rows=1 width=40) (actual time=0.000..0.000 rows=0 loops=2920)
+                          Cache Key: tickets.assignee_id
+                          Cache Mode: binary
+                          Hits: 2919  Misses: 1  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+                          ->  Subquery Scan on tickets_assignee_1  (cost=0.57..8.60 rows=1 width=40) (actual time=0.001..0.003 rows=0 loops=1)
+                                ->  Limit  (cost=0.57..8.59 rows=1 width=16) (actual time=0.001..0.002 rows=0 loops=1)
+                                      InitPlan 5
+                                        ->  Result  (cost=0.00..0.03 rows=1 width=16) (never executed)
+                                      InitPlan 6
+                                        ->  Result  (cost=0.00..0.26 rows=1 width=1) (never executed)
+                                      ->  Index Scan using profiles_pkey on profiles profiles_1_1  (cost=0.28..8.30 rows=1 width=16) (actual time=0.001..0.001 rows=0 loops=1)
+                                            Index Cond: (id = tickets.assignee_id)
+                                            Filter: ((id = (InitPlan 5).col1) OR (role = 'agent'::text) OR (InitPlan 6).col1)
+Planning Time: 0.531 ms
+Execution Time: 12.480 ms
+
+
+=== Execution Time over 7 runs (ms) ===
+12.48, 13.091, 12.178, 11.551, 11.957, 11.889, 12.896
+median: 12.178 ms
+(exit 0)
+
+##### BY HAND (before fix): by-hand.sql step by step through Studio's SQL endpoint, EXPLAIN steps timed (1 warm-up + 7 runs)
+$ node lab/common/by-hand.mjs lab/03-slow-ticket-list/by-hand.sql --runs 7
+by hand: lab/03-slow-ticket-list/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
+
+--- Step 2 is a plain SQL version of the agent's list request. It has no embedded
+┌─────────┐
+│ (index) │
+├─────────┤
+└─────────┘
+
+--- Step 1: table size and the indexes that exist
+┌─────────┬────────────┬─────────┬──────────────────────────────────────────────────────────────────┐
+│ (index) │ heap_pages │ tickets │ indexes                                                          │
+├─────────┼────────────┼─────────┼──────────────────────────────────────────────────────────────────┤
+│ 0       │ 1114       │ 50040   │ 'tickets_assignee_id_idx, tickets_customer_id_idx, tickets_pkey' │
+└─────────┴────────────┴─────────┴──────────────────────────────────────────────────────────────────┘
+
+--- Step 2: as ava.agent@example.com (agent), the plan of the list query
+Limit  (cost=1913.92..1914.05 rows=50 width=40) (actual time=7.749..7.757 rows=50 loops=1)
+  Buffers: shared hit=1172
+  InitPlan 1
+    ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.010..0.011 rows=1 loops=1)
+  InitPlan 2
+    ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.339..0.339 rows=1 loops=1)
+          Buffers: shared hit=55
+  ->  Sort  (cost=1913.63..1917.32 rows=1476 width=40) (actual time=7.748..7.752 rows=50 loops=1)
+        Sort Key: tickets.created_at DESC
+        Sort Method: top-N heapsort  Memory: 31kB
+        Buffers: shared hit=1172
+        ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1476 width=40) (actual time=0.360..7.317 rows=2920 loops=1)
+              Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (status = 'open'::text))
+              Rows Removed by Filter: 47120
+              Buffers: shared hit=1169
+Planning:
+  Buffers: shared hit=169
+Planning Time: 0.433 ms
+Execution Time: 7.793 ms
+Execution Time over 7 runs after 1 warm-up (ms): 7.793, 7.166, 12.217, 7.509, 7.533, 7.07, 7.115
+median: 7.509 ms
+(exit 0)
+
+##### TEST (before fix, expected to FAIL)
+$ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/03-slow-ticket-list/test.sql
+/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
+/AI_WORK/Projects/supabase-support-desk/lab/03-slow-ticket-list/test.sql ............... 
+# Failed test 2: "agent list query does not sequentially scan tickets"
+#     Unexpected records:
+#         ("        ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1476 width=61)")
+# Failed test 3: "agent list query reads the (status, created_at desc) index"
+# Looks like you failed 2 tests of 3
+Failed 2/3 subtests 
+
+Test Summary Report
+-------------------
+/AI_WORK/Projects/supabase-support-desk/lab/03-slow-ticket-list/test.sql             (Wstat: 0 Tests: 3 Failed: 2)
+  Failed tests:  2-3
+Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.01 cusr  0.01 csys =  0.05 CPU)
+Result: FAIL
+Connecting to local database...
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  schema "tests" does not exist, skipping
+error running container: exit 1
+(exit 1)
+
+##### FIX: apply the fix migration
+$ node scripts/sql.mjs lab/03-slow-ticket-list/fix.sql
+CREATE INDEX
+ANALYZE
+(exit 0)
+
+##### DIAGNOSE (after fix)
+$ node lab/03-slow-ticket-list/diagnose.mjs
+
+=== Table size and indexes on public.tickets ===
+{ rows: 50040, heap: '8912 kB' }
+  CREATE INDEX tickets_assignee_id_idx ON public.tickets USING btree (assignee_id)
+  CREATE INDEX tickets_customer_id_idx ON public.tickets USING btree (customer_id)
+  CREATE UNIQUE INDEX tickets_pkey ON public.tickets USING btree (id)
+  CREATE INDEX tickets_status_created_at_idx ON public.tickets USING btree (status, created_at DESC)
+
+=== Agent list request through the API, EXPLAIN (ANALYZE, BUFFERS) ===
+Aggregate  (cost=337.18..337.20 rows=1 width=144) (actual time=0.734..0.737 rows=1 loops=1)
+  Buffers: shared hit=206
+  ->  Limit  (cost=1.86..336.93 rows=50 width=125) (actual time=0.294..0.577 rows=50 loops=1)
+        Buffers: shared hit=206
+        InitPlan 1
+          ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.016..0.016 rows=1 loops=1)
+        InitPlan 2
+          ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.128..0.129 rows=1 loops=1)
+                Buffers: shared hit=3
+        ->  Nested Loop Left Join  (cost=1.57..9912.77 rows=1479 width=125) (actual time=0.293..0.573 rows=50 loops=1)
+              Buffers: shared hit=206
+              ->  Nested Loop Left Join  (cost=0.99..9819.23 rows=1479 width=117) (actual time=0.286..0.511 rows=50 loops=1)
+                    Buffers: shared hit=206
+                    ->  Index Scan using tickets_status_created_at_idx on tickets  (cost=0.41..3061.60 rows=1479 width=93) (actual time=0.170..0.217 rows=50 loops=1)
+                          Index Cond: (status = 'open'::text)
+                          Filter: ((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1)
+                          Buffers: shared hit=56
+                    ->  Memoize  (cost=0.58..8.61 rows=1 width=40) (actual time=0.004..0.005 rows=1 loops=50)
+                          Cache Key: tickets.customer_id
+                          Cache Mode: binary
+                          Hits: 1  Misses: 49  Evictions: 0  Overflows: 0  Memory Usage: 8kB
+                          Buffers: shared hit=150
+                          ->  Subquery Scan on tickets_customer_1  (cost=0.57..8.60 rows=1 width=40) (actual time=0.004..0.004 rows=1 loops=49)
+                                Buffers: shared hit=150
+                                ->  Limit  (cost=0.57..8.59 rows=1 width=16) (actual time=0.004..0.004 rows=1 loops=49)
+                                      Buffers: shared hit=150
+                                      InitPlan 3
+                                        ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.007..0.008 rows=1 loops=1)
+                                      InitPlan 4
+                                        ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.099..0.099 rows=1 loops=1)
+                                              Buffers: shared hit=3
+                                      ->  Index Scan using profiles_pkey on profiles profiles_1  (cost=0.28..8.30 rows=1 width=16) (actual time=0.004..0.004 rows=1 loops=49)
+                                            Index Cond: (id = tickets.customer_id)
+                                            Filter: ((id = (InitPlan 3).col1) OR (role = 'agent'::text) OR (InitPlan 4).col1)
+                                            Buffers: shared hit=150
+              ->  Memoize  (cost=0.58..8.61 rows=1 width=40) (actual time=0.000..0.000 rows=0 loops=50)
+                    Cache Key: tickets.assignee_id
+                    Cache Mode: binary
+                    Hits: 49  Misses: 1  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+                    ->  Subquery Scan on tickets_assignee_1  (cost=0.57..8.60 rows=1 width=40) (actual time=0.003..0.004 rows=0 loops=1)
+                          ->  Limit  (cost=0.57..8.59 rows=1 width=16) (actual time=0.003..0.003 rows=0 loops=1)
+                                InitPlan 5
+                                  ->  Result  (cost=0.00..0.03 rows=1 width=16) (never executed)
+                                InitPlan 6
+                                  ->  Result  (cost=0.00..0.26 rows=1 width=1) (never executed)
+                                ->  Index Scan using profiles_pkey on profiles profiles_1_1  (cost=0.28..8.30 rows=1 width=16) (actual time=0.002..0.002 rows=0 loops=1)
+                                      Index Cond: (id = tickets.assignee_id)
+                                      Filter: ((id = (InitPlan 5).col1) OR (role = 'agent'::text) OR (InitPlan 6).col1)
+Planning Time: 0.331 ms
+Execution Time: 0.800 ms
+
+
+=== Execution Time over 7 runs (ms) ===
+0.8, 0.879, 0.755, 0.698, 0.724, 0.747, 0.76
+median: 0.755 ms
+(exit 0)
+
+##### BY HAND (after fix): by-hand.sql step by step through Studio's SQL endpoint, EXPLAIN steps timed (1 warm-up + 7 runs)
+$ node lab/common/by-hand.mjs lab/03-slow-ticket-list/by-hand.sql --runs 7
+by hand: lab/03-slow-ticket-list/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
+
+--- Step 2 is a plain SQL version of the agent's list request. It has no embedded
+┌─────────┐
+│ (index) │
+├─────────┤
+└─────────┘
+
+--- Step 1: table size and the indexes that exist
+┌─────────┬────────────┬─────────┬─────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ (index) │ heap_pages │ tickets │ indexes                                                                                         │
+├─────────┼────────────┼─────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 1114       │ 50040   │ 'tickets_assignee_id_idx, tickets_customer_id_idx, tickets_pkey, tickets_status_created_at_idx' │
+└─────────┴────────────┴─────────┴─────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+--- Step 2: as ava.agent@example.com (agent), the plan of the list query
+Limit  (cost=0.71..104.20 rows=50 width=40) (actual time=0.367..0.526 rows=50 loops=1)
+  Buffers: shared hit=109
+  InitPlan 1
+    ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.010..0.011 rows=1 loops=1)
+  InitPlan 2
+    ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.314..0.314 rows=1 loops=1)
+          Buffers: shared hit=56
+  ->  Index Scan using tickets_status_created_at_idx on tickets  (cost=0.41..3061.60 rows=1479 width=40) (actual time=0.366..0.522 rows=50 loops=1)
+        Index Cond: (status = 'open'::text)
+        Filter: ((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1)
+        Buffers: shared hit=109
+Planning:
+  Buffers: shared hit=195
+Planning Time: 0.500 ms
+Execution Time: 0.561 ms
+Execution Time over 7 runs after 1 warm-up (ms): 0.561, 0.656, 0.693, 0.544, 0.549, 0.567, 0.6
+median: 0.567 ms
+(exit 0)
+
+##### TEST (after fix, expected to PASS)
+$ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/03-slow-ticket-list/test.sql
+/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
+/AI_WORK/Projects/supabase-support-desk/lab/03-slow-ticket-list/test.sql ............... ok
+All tests successful.
+Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.01 cusr  0.01 csys =  0.05 CPU)
+Result: PASS
+Connecting to local database...
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to function tests.create_user(text,text,text)
+drop cascades to function tests.uid(text)
+drop cascades to function tests.authenticate_as(text)
+drop cascades to function tests.as_anon()
+(exit 0)
+
+# RESULT scenario 3: test before fix FAILED (expected), after fix PASSED -> OK
