@@ -8,16 +8,17 @@ export type Category = (typeof CATEGORIES)[number]
 export type Priority = (typeof PRIORITIES)[number]
 
 export type Classification = {
-  classifier: 'claude-haiku-4-5' | 'stub' | 'error'
+  classifier: 'claude-haiku-4-5' | 'stub' | 'error' | 'skipped'
   category: Category | null
   priority: Priority | null
   note?: string
 }
 
 // Stored in tickets.triage_outcome (see migration 20261004000500).
-export type TriageOutcome = 'classified' | 'no_key' | 'failed'
+export type TriageOutcome = 'classified' | 'no_key' | 'failed' | 'skipped'
 
 export function outcomeOf(result: Classification): TriageOutcome {
+  if (result.classifier === 'skipped') return 'skipped'
   if (result.classifier === 'stub') return 'no_key'
   if (result.classifier === 'error') return 'failed'
   return 'classified'
@@ -94,4 +95,17 @@ export async function classifyTicket(
     console.error('triage classify:', note, err instanceof Error ? err.message : err)
     return { classifier: 'error', category: null, priority: null, note }
   }
+}
+
+// Calls the model only when there is something to fill: if an agent (or the seed)
+// already set both category and priority, the result is "skipped" and no call is
+// made. The caller still stores the embedding either way.
+export async function classifyIfNeeded(
+  client: MessagesClient | null,
+  ticket: { subject: string; body: string; category: string | null; priority: string | null },
+): Promise<Classification> {
+  if (ticket.category && ticket.priority) {
+    return { classifier: 'skipped', category: null, priority: null, note: 'category and priority already set' }
+  }
+  return classifyTicket(client, ticket.subject, ticket.body)
 }

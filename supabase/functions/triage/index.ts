@@ -9,7 +9,7 @@ import '@supabase/functions-js/edge-runtime.d.ts'
 import { withSupabase } from '@supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 
-import { classifyTicket, outcomeOf } from './classify.ts'
+import { classifyIfNeeded, outcomeOf } from './classify.ts'
 
 // Built-in embedding model (gte-small, 384 dimensions). Created once per worker.
 const embedder = new Supabase.ai.Session('gte-small')
@@ -54,7 +54,8 @@ export default {
 
     const text = `${ticket.subject}\n\n${ticket.body}`
     const embedding = (await embedder.run(text, { mean_pool: true, normalize: true })) as number[]
-    const result = await classifyTicket(anthropicClient(), ticket.subject, ticket.body)
+    // No model call when an agent already set both fields; the embedding is still stored.
+    const result = await classifyIfNeeded(anthropicClient(), ticket)
 
     // Never overwrite a category or priority an agent already set.
     const outcome = outcomeOf(result)

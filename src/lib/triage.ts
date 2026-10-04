@@ -3,8 +3,8 @@ import { supabase } from './supabase'
 export type TriageResult = {
   ticket_id: number
   embedding_dimensions?: number
-  classifier?: 'claude-haiku-4-5' | 'stub' | 'error'
-  outcome?: 'classified' | 'no_key' | 'failed'
+  classifier?: 'claude-haiku-4-5' | 'stub' | 'error' | 'skipped'
+  outcome?: 'classified' | 'no_key' | 'failed' | 'skipped'
   category?: string | null
   priority?: string | null
   note?: string

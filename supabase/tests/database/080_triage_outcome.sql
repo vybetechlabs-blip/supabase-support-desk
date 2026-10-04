@@ -1,7 +1,7 @@
 -- tickets.triage_outcome records what the classifier did, separately from
 -- triaged_at (which stays the once-per-ticket gate for customer-triggered runs).
 begin;
-select plan(4);
+select plan(5);
 
 select has_column('public', 'tickets', 'triage_outcome', 'tickets has a triage_outcome column');
 select col_is_null('public', 'tickets', 'triage_outcome', 'triage_outcome is empty until triage runs');
@@ -20,6 +20,12 @@ select throws_ok(
      values (tests.uid('to.cust@test.local'), 's', 'b', 'guessed') $$,
   '23514', null,
   'triage_outcome only accepts the known outcomes'
+);
+
+select lives_ok(
+  $$ insert into public.tickets (customer_id, subject, body, category, priority, triage_outcome)
+     values (tests.uid('to.cust@test.local'), 's', 'b', 'bug', 'low', 'skipped') $$,
+  'triage_outcome accepts skipped (category and priority were already set)'
 );
 
 select * from finish();

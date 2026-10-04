@@ -68,5 +68,19 @@ const agent = await signIn('ava.agent@example.com')
 const rerun = await agent.functions.invoke('triage', { body: { ticket_id: ticket.id, force: true } })
 check('agent re-run reports the failure', !rerun.error && rerun.data?.classifier === 'error', JSON.stringify(rerun.data))
 
+// With both fields set there is nothing to classify: no model call, embedding still stored.
+const { error: setError } = await agent.from('tickets').update({ category: 'bug', priority: 'low' }).eq('id', ticket.id)
+check('agent sets category and priority', !setError, setError?.message)
+const skip = await agent.functions.invoke('triage', { body: { ticket_id: ticket.id, force: true } })
+check('re-run with both fields set skips the model call',
+  !skip.error && skip.data?.classifier === 'skipped' && skip.data?.outcome === 'skipped', JSON.stringify(skip.data))
+const sql2 = postgres(DB_URL, { max: 1 })
+const [after] = await sql2`
+  select triage_outcome, category, priority, vector_dims(embedding) as dims from public.tickets where id = ${ticket.id}`
+await sql2.end()
+check('skipped run keeps the agent values and the embedding',
+  after?.triage_outcome === 'skipped' && after?.category === 'bug' && after?.priority === 'low' && after?.dims === 384,
+  JSON.stringify(after))
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed')
 process.exit(failures ? 1 : 0)

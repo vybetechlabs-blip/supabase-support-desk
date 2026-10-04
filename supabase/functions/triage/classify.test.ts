@@ -3,7 +3,7 @@
 // TypeScript files directly by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyTicket, outcomeOf, SYSTEM_PROMPT, type MessagesClient } from './classify.ts'
+import { classifyIfNeeded, classifyTicket, outcomeOf, SYSTEM_PROMPT, type MessagesClient } from './classify.ts'
 
 const reply = (text: string, stop_reason = 'end_turn'): MessagesClient => ({
   messages: { create: async () => ({ stop_reason, content: [{ type: 'text', text }] }) },
@@ -81,4 +81,19 @@ test('outcomeOf maps each classifier result to the stored triage_outcome', () =>
   assert.equal(outcomeOf({ classifier: 'claude-haiku-4-5', category: 'bug', priority: 'high' }), 'classified')
   assert.equal(outcomeOf({ classifier: 'stub', category: null, priority: null }), 'no_key')
   assert.equal(outcomeOf({ classifier: 'error', category: null, priority: null, note: 'Anthropic API 401' }), 'failed')
+})
+
+test('classifyIfNeeded skips the model when category and priority are both set', async () => {
+  let calls = 0
+  const counting: MessagesClient = {
+    messages: { create: async () => { calls++; return { stop_reason: 'end_turn', content: [{ type: 'text', text: '{"category":"bug","priority":"low"}' }] } } },
+  }
+  const skipped = await classifyIfNeeded(counting, { subject: 's', body: 'b', category: 'billing', priority: 'high' })
+  assert.equal(calls, 0)
+  assert.equal(skipped.classifier, 'skipped')
+  assert.equal(outcomeOf(skipped), 'skipped')
+
+  const partly = await classifyIfNeeded(counting, { subject: 's', body: 'b', category: 'billing', priority: null })
+  assert.equal(calls, 1, 'one field missing: the model is called')
+  assert.equal(partly.classifier, 'claude-haiku-4-5')
 })

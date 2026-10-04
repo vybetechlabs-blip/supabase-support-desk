@@ -228,6 +228,7 @@ const OUTCOME_TEXT: Record<string, string> = {
   classified: 'Classification: category and priority suggested by the model.',
   no_key: 'Classification: not run (no ANTHROPIC_API_KEY). Set category and priority by hand.',
   failed: 'Classification: failed. Set category and priority by hand, or re-run triage.',
+  skipped: 'Classification: skipped, category and priority were already set.',
 }
 
 function TriageBox({ ticket, onDone }: { ticket: TicketView; onDone: () => void }) {
@@ -240,6 +241,7 @@ function TriageBox({ ticket, onDone }: { ticket: TicketView; onDone: () => void 
     setBusy(false)
     if ('error' in r) setResult(`Triage failed: ${r.error}`)
     else if (r.classifier === 'stub') setResult('Embedding stored. Classification is a stub (no ANTHROPIC_API_KEY): set category and priority by hand.')
+    else if (r.classifier === 'skipped') setResult('Embedding stored. Classification skipped: category and priority were already set.')
     else if (r.classifier === 'error') setResult(`Embedding stored. Classification failed (${r.note ?? 'unknown error'}).`)
     else setResult(`Classified by ${r.classifier}: ${r.category ?? '?'} / ${r.priority ?? '?'}`)
     onDone()
