@@ -15,9 +15,9 @@ saying how it was measured:
 
 | Tag | What was run | How timings were taken |
 |---|---|---|
-| **[API]** | `lab/0N-*/diagnose.mjs`: the request the app sends, through the Data API (PostgREST), signed in as the user, plan captured with supabase-js `.explain({ analyze: true, buffers: true })` | 1 warm-up, then 7 runs; median reported, all 7 listed |
-| **[by hand]** | `lab/0N-*/by-hand.sql`: the steps in the "Reproduce it by hand" sections, each sent on its own to the local Studio's SQL endpoint, `/api/platform/pg-meta/default/query` (we checked in the browser that the SQL editor's Run button posts there; it runs as `postgres`) | same: 1 warm-up, then 7 runs |
-| **[count]** | a row count or function-call count | single run; these do not vary |
+| **(API)** | `lab/0N-*/diagnose.mjs`: the request the app sends, through the Data API (PostgREST), signed in as the user, plan captured with supabase-js `.explain({ analyze: true, buffers: true })` | 1 warm-up, then 7 runs; median reported, all 7 listed |
+| **(by hand)** | `lab/0N-*/by-hand.sql`: the steps in the "Reproduce it by hand" sections, each sent on its own to the local Studio's SQL endpoint, `/api/platform/pg-meta/default/query` (we checked in the browser that the SQL editor's Run button posts there; it runs as `postgres`) | same: 1 warm-up, then 7 runs |
+| **(count)** | a row count or function-call count | single run; these do not vary |
 
 Timings depend on the machine (these came from a Windows 11 workstation running
 Docker Desktop 4.93.0 and Postgres 17.11). Expect your timings to differ; plan
@@ -25,7 +25,7 @@ shapes, row counts, call counts and buffer counts should match, with one
 exception explained in scenario 3 (about 55 extra buffers the first time a
 statement runs in a new database session).
 
-**[API] and [by hand] numbers measure different queries.** The API request
+**(API) and (by hand) numbers measure different queries.** The API request
 includes everything PostgREST adds (embedded resources, JSON aggregation, the
 full JWT claims of a real session). The by-hand SQL is the smallest query that
 shows the problem. Each scenario says what the difference is.
@@ -43,7 +43,7 @@ Each run **resets the local database first** (it wipes local data), then:
 
 1. loads the 50,000-ticket lab data set (scenarios 3 and 4 only, `lab/common/bulk-seed.sql`)
 2. applies `break.sql`, which puts the database into the state the developer reported
-3. runs `diagnose.mjs` ([API] evidence) and `by-hand.sql` ([by hand] evidence)
+3. runs `diagnose.mjs` ((API) evidence) and `by-hand.sql` ((by hand) evidence)
 4. runs `test.sql` with pgTAP and requires it to **fail**
 5. applies `fix.sql`, the migration we would hand back
 6. repeats step 3, then runs `test.sql` and requires it to **pass**
@@ -52,7 +52,7 @@ Output goes to the console and to `lab/out/<scenario>.log`. To restore the demo
 data afterwards: `npm run test:db` (or `npx supabase db reset`), then
 `npm run embed:backfill`.
 
-To capture [API] plans, the lab turns on PostgREST's plan output for the local
+To capture (API) plans, the lab turns on PostgREST's plan output for the local
 database only
 (`alter role authenticator in database postgres set pgrst.db_plan_enabled to 'true'`).
 The next `supabase db reset` removes it. Do not turn it on in production; the
@@ -97,7 +97,7 @@ result of the last statement, so `set local role` lasts for that run only.
 The first question is whether the database really returns the notes to the
 customer, or whether the leak is somewhere in your frontend. So we queried
 exactly as the customer's browser does: publishable key, signed in as the
-customer (`lab/01-policy-leak/diagnose.mjs`, [API]):
+customer (`lab/01-policy-leak/diagnose.mjs`, (API)):
 
 ```
 === As customer dana@example.com (publishable key + her session): messages on her tickets ===
@@ -152,7 +152,7 @@ create policy "messages: customers read own public, agents read all"
 
 The `is_internal = false` sits inside the customer branch, next to the
 ownership check, so agents still read everything. After the fix the same request
-returns `rows returned: 9, of which is_internal = true: 0` [API].
+returns `rows returned: 9, of which is_internal = true: 0` (API).
 
 Realtime follows the same policy. With the correct policy in place, a customer's
 subscription to `messages` does not receive internal-note events at all (checked
@@ -180,13 +180,13 @@ After the fix the same file passes.
 Load the broken state: `npx supabase db reset`, then
 `npm run sql -- lab/01-policy-leak/break.sql`. In Studio's SQL editor:
 
-1. **As dana@example.com, count the internal notes she can read** (step 1 of the
+1. **As dana@example.com, count the internal notes the customer can read** (step 1 of the
    file). You should see `internal_notes_visible = 3`, on tickets 1, 9 and 17
-   [count]. A customer session gets them from the database itself.
+   (count). A customer session gets them from the database itself.
 2. **Read the select policy** (step 2). The `qual` column is the `USING` clause
    above, with no `is_internal`.
 3. Apply the fix (`npm run sql -- lab/01-policy-leak/fix.sql`) and run step 1
-   again: `internal_notes_visible = 0` [count].
+   again: `internal_notes_visible = 0` (count).
 
 You can also see it in the app: sign in as Dana in the broken state and open
 ticket #1. The note appears with an "internal note" badge.
@@ -198,10 +198,10 @@ ticket #1. The note appears with an "internal note" badge.
 > Since yesterday's deploy, customers get an error when they reply to a ticket.
 > Agents can still post. We didn't change the app code, only some policies.
 
-### What we ran, step by step (`lab/02-blocked-reply/diagnose.mjs`, [API])
+### What we ran, step by step (`lab/02-blocked-reply/diagnose.mjs`, (API))
 
 **1. Reproduce what the client sees.** Signed in as the customer, insert a reply
-on her own ticket #9:
+on the customer's own ticket #9:
 
 ```
 HTTP 403 Forbidden
@@ -280,7 +280,7 @@ create policy "messages: agents post anywhere, customers reply on own tickets"
   );
 ```
 
-After the fix the same client request returns `HTTP 201 Created` [API].
+After the fix the same client request returns `HTTP 201 Created` (API).
 
 ### How we proved it (`lab/02-blocked-reply/test.sql`)
 
@@ -322,7 +322,7 @@ reply. The error appears in red under the reply box.
 > Our agents' main screen lists open tickets, newest first, 50 at a time. It was
 > instant at launch and it gets a little slower every week.
 
-### What we ran (`lab/03-slow-ticket-list/diagnose.mjs`, [API])
+### What we ran (`lab/03-slow-ticket-list/diagnose.mjs`, (API))
 
 The lab loads 50,000 tickets (50,040 with the seed; 2,920 open) and removes the
 index that the app's migrations normally create, to match your database. Then
@@ -347,7 +347,7 @@ editor would leave out.
 ### What the plan showed
 
 Indexes on `tickets` at the time: primary key, `customer_id`, `assignee_id`.
-The key nodes of the plan [API] (the nodes for the two embedded names are
+The key nodes of the plan (API) (the nodes for the two embedded names are
 summarised in the comment; they are in the evidence log):
 
 ```
@@ -365,7 +365,7 @@ Planning Time: 0.531 ms
 Execution Time: 12.480 ms
 ```
 
-Execution time [API], 7 runs (ms): 12.48, 13.091, 12.178, 11.551, 11.957, 11.889,
+Execution time (API), 7 runs (ms): 12.48, 13.091, 12.178, 11.551, 11.957, 11.889,
 12.896. **Median 12.178 ms.**
 
 ### Why that points to the cause
@@ -397,7 +397,7 @@ it with `create index concurrently` so writes are not blocked; that statement
 cannot run inside a transaction block, so run it outside a migration that your
 tooling wraps in a transaction.
 
-### After the fix [API]
+### After the fix (API)
 
 ```
 Aggregate  (cost=337.18..337.20 rows=1 width=144) (actual time=0.734..0.737 rows=1 loops=1)
@@ -411,7 +411,7 @@ Planning Time: 0.331 ms
 Execution Time: 0.800 ms
 ```
 
-Execution time [API], 7 runs (ms): 0.8, 0.879, 0.755, 0.698, 0.724, 0.747, 0.76.
+Execution time (API), 7 runs (ms): 0.8, 0.879, 0.755, 0.698, 0.724, 0.747, 0.76.
 **Median 0.755 ms**, down from 12.178 ms. The scan reads 50 rows instead of
 50,040, the sort is gone, the name lookups run 50 times instead of 2,920, and the
 request touches 206 buffers instead of 3,994.
@@ -438,10 +438,10 @@ Load the broken state: `npx supabase db reset`, then
 
 1. **Table size and indexes** (step 1): `heap_pages = 1114`, `tickets = 50040`,
    indexes `tickets_assignee_id_idx, tickets_customer_id_idx, tickets_pkey`
-   [count].
+   (count).
 2. **As ava.agent@example.com, plan the list query** (step 2). This is plain SQL:
    it selects four columns and has no embedded names, so it does less work than
-   the API request above. You should see [by hand]:
+   the API request above. You should see (by hand):
 
    ```
    Limit  (cost=1913.92..1914.05 rows=50 width=40) (actual time=7.749..7.757 rows=50 loops=1)
@@ -455,21 +455,21 @@ Load the broken state: `npx supabase db reset`, then
    Execution Time: 7.793 ms
    ```
 
-   Execution time [by hand], 7 runs (ms): 7.793, 7.166, 12.217, 7.509, 7.533,
+   Execution time (by hand), 7 runs (ms): 7.793, 7.166, 12.217, 7.509, 7.533,
    7.07, 7.115. **Median 7.509 ms.**
 
-   Why the scan shows 1,169 buffers here and 1,117 in the [API] plan: the table
+   Why the scan shows 1,169 buffers here and 1,117 in the (API) plan: the table
    is 1,114 pages either way. The role check (`(select private.is_agent())`)
    runs once per statement, and the first time it runs in a **new database
    session**, Postgres reads about 55 pages of system catalog to load metadata
    into that session's cache; those reads are counted under the scan. The plan
    above came from a request that Studio's endpoint ran in a new session (the
-   InitPlan line shows the 55); the [API] request reused a warm session.
+   InitPlan line shows the 55); the (API) request reused a warm session.
    `lab/common/probes.mjs` shows the effect directly
    ([`probes.log`](lab/evidence/2026-10-04/probes.log)): the same statement read
    1,173 buffers on its first run in a new session and 1,117 on every repeat.
 3. Apply the fix (`npm run sql -- lab/03-slow-ticket-list/fix.sql`) and run step 2
-   again [by hand]: `Index Scan using tickets_status_created_at_idx` with
+   again (by hand): `Index Scan using tickets_status_created_at_idx` with
    `rows=50` and no Sort node, `Buffers: shared hit=109`. Execution time 7 runs
    (ms): 0.561, 0.656, 0.693, 0.544, 0.549, 0.567, 0.6. **Median 0.567 ms.**
 
@@ -502,7 +502,7 @@ Execution Time: 5.264 ms
 7 runs on a direct connection (ms): 5.264, 5.517, 5.972, 5.416, 5.46, 5.588,
 5.389. **Median 5.46 ms.**
 
-From the app, signed in as an agent, through the API [API]
+From the app, signed in as an agent, through the API (API)
 (`select('id', { count: 'exact' }).eq('category', 'billing').limit(1)`):
 
 ```
@@ -548,7 +548,7 @@ Two things happen to these calls:
   the role check each time.
 
 To confirm, we counted calls for one request with `track_functions = 'all'` and
-`pg_stat_xact_user_functions` [count]:
+`pg_stat_xact_user_functions` (count):
 
 ```
 { rows_counted: 7220, is_agent_calls: 7220 }
@@ -582,7 +582,7 @@ it as an InitPlan, run it once per statement, and reuse the value for every
 row. This is the pattern the Supabase RLS performance guide recommends for
 `auth.uid()`, `auth.jwt()` and security definer helpers.
 
-### After the fix [API]
+### After the fix (API)
 
 ```
 Aggregate  (cost=1874.73..1874.75 rows=1 width=144) (actual time=6.618..6.621 rows=1 loops=1)
@@ -598,7 +598,7 @@ Execution Time: 6.672 ms
 7 runs (ms): 6.672, 6.818, 6.214, 6.614, 6.192, 5.981, 6.348. **Median 6.348 ms**,
 down from 150.374 ms and within 1 ms of the table owner (median 5.356 ms in the
 same after-fix pass). Buffers: 1,122 instead of 22,779. Call count:
-`{ rows_counted: 7220, is_agent_calls: 1 }` [count].
+`{ rows_counted: 7220, is_agent_calls: 1 }` (count).
 
 There is still a sequential scan, because nothing indexes `category`. That is a
 separate question (scenario 3's kind); this fix removes the RLS overhead.
@@ -628,12 +628,12 @@ Load the broken state: `npx supabase db reset`, then
 `npm run sql -- lab/common/bulk-seed.sql` and
 `npm run sql -- lab/04-slow-policy/break.sql`. In Studio's SQL editor:
 
-| Step | What it runs | Broken policy [by hand] | After the fix [by hand] |
+| Step | What it runs | Broken policy (by hand) | After the fix (by hand) |
 |---|---|---|---|
 | 1 | count as the table owner | median **6.308 ms**, 1,114 buffers | median 6.375 ms |
 | 2 | count as the agent, minimal claims (`sub`, `role`) | median **85.943 ms**, 22,831 buffers, `private.is_agent()` in the Filter line | median 7.429 ms, 1,175 buffers, `(InitPlan 2).col1` in the Filter line |
 | 3 | count as the agent, token-sized claims built from the user's row | median **151.015 ms**, 22,831 buffers | median 7.611 ms |
-| 4 | calls to `private.is_agent()` for one count | `is_agent_calls = 7220` [count] | `is_agent_calls = 1` [count] |
+| 4 | calls to `private.is_agent()` for one count | `is_agent_calls = 7220` (count) | `is_agent_calls = 1` (count) |
 | 5 | the select policy | `((customer_id = auth.uid()) OR private.is_agent())` | `((customer_id = ( SELECT auth.uid() AS uid)) OR ( SELECT private.is_agent() AS is_agent))` |
 
 All 7 runs (ms) for each timed step:
@@ -642,6 +642,6 @@ All 7 runs (ms) for each timed step:
 - Step 2 broken: 85.076, 86.279, 85.747, 88.898, 85.943, 89.213, 85.269. After fix: 12.087, 7.447, 7.647, 6.836, 7.368, 7.429, 7.043.
 - Step 3 broken: 189.519, 148.704, 148.322, 151.015, 156.427, 157.039, 150.194. After fix: 7.611, 7.638, 7.57, 7.66, 7.54, 7.176, 7.877.
 
-Step 3 lands near the [API] number because it matches what the API does:
+Step 3 lands near the (API) number because it matches what the API does:
 token-sized claims, parsed per row. Step 2 is faster only because its claims are
 tiny; the policy is equally broken in both.

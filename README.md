@@ -1,14 +1,189 @@
 # Supabase Support Desk
 
-A small support desk built on Supabase: customers file tickets, agents answer them,
-and every new ticket is triaged by an Edge Function that stores an embedding and
-classifies it. The agent view suggests similar resolved tickets with their
-resolutions. [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) is a lab of four reproducible
-Supabase problems (row level security and query performance), each with a diagnosis,
-a fix and a test.
+A small support desk built on Supabase. Customers file tickets and reply on them;
+agents see every ticket, filter, assign, reply, add internal notes and resolve.
+Every new ticket is triaged by an Edge Function that stores an embedding and
+classifies it, and the agent view suggests similar resolved tickets with their
+resolutions. Row level security decides who sees what, everywhere: the Data API,
+Realtime and the similar-ticket search.
 
-> Status: the full setup guide, architecture notes and walkthrough are still being
-> written. The section below describes ticket triage as it behaves today.
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) is the other half of the project: four
+reproducible Supabase problems (two row level security bugs, two performance
+problems), each with the diagnosis, a fix migration and a test that fails before
+the fix and passes after.
+
+Built with Claude Code; the troubleshooting write-ups were verified by hand.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Setup from a fresh clone](#setup-from-a-fresh-clone)
+- [Walkthrough](#walkthrough)
+- [Architecture](#architecture)
+- [Ticket triage](#ticket-triage)
+- [Tests](#tests)
+- [Troubleshooting lab](#troubleshooting-lab)
+- [Commands](#commands)
+- [Project layout](#project-layout)
+- [Limitations](#limitations)
+
+## Requirements
+
+- **Node.js 22.18 or newer** (Vite 8 needs 20.19+ or 22.12+; the unit tests run
+  TypeScript directly, which needs 22.18+).
+- **Docker Desktop**, or another Docker-compatible runtime, running. The local
+  Supabase stack runs in containers.
+
+Nothing else: the Supabase CLI is an npm dev dependency (`npx supabase`), and no
+psql or Deno install is needed.
+
+## Setup from a fresh clone
+
+```bash
+git clone <this-repo> supabase-support-desk
+cd supabase-support-desk
+npm install
+npx supabase start
+```
+
+`npx supabase start` downloads the container images on the first run (the
+slowest step), applies the migrations in `supabase/migrations/` and loads
+`supabase/seed.sql`. When it finishes it prints the local URLs and keys.
+
+Then:
+
+```bash
+npm run env:local
+npm run embed:backfill
+npm run dev
+```
+
+- `npm run env:local` writes `.env.local` with the API URL and the
+  **publishable** key from `npx supabase status`. (Or copy `.env.example` to
+  `.env.local` and fill in the two values yourself. Never put the secret key in
+  it: everything prefixed `VITE_` is shipped to the browser.)
+- `npm run embed:backfill` computes embeddings for the 40 seeded tickets, so
+  similar-ticket suggestions work. It calls the `triage` Edge Function as a
+  seeded agent.
+- `npm run dev` serves the app at **http://127.0.0.1:5173**.
+
+Local services: API `http://127.0.0.1:54321`, Studio `http://127.0.0.1:54323`,
+Mailpit `http://127.0.0.1:54324`, Postgres `127.0.0.1:54322`.
+
+### Demo accounts
+
+All seeded accounts use the password `desk-demo-pass` (local stack only; the
+people and emails are invented, on `example.com`):
+
+| Role | Accounts |
+|---|---|
+| Agent | `ava.agent@example.com`, `ben.agent@example.com`, `cleo.agent@example.com` |
+| Customer | `dana@example.com`, `eli@example.com`, `faye@example.com`, `gus@example.com`, `hana@example.com`, `ivo@example.com`, `june@example.com`, `kai@example.com` |
+
+New customers can also sign up from the sign-in page (email confirmation is off
+in the local stack). Sign-up always creates a customer; agents are promoted in
+the database.
+
+### Optional: ticket classification
+
+To classify tickets with Claude Haiku 4.5, copy `supabase/functions/.env.example`
+to `supabase/functions/.env` (git-ignored), set `ANTHROPIC_API_KEY`, and restart
+the stack (`npx supabase stop`, then `npx supabase start`). Without a key, triage
+still stores embeddings and the app works; category and priority are left for an
+agent to set. See [Ticket triage](#ticket-triage).
+
+## Walkthrough
+
+Use two browser sessions that do not share a login: two browsers, a private
+window, or the two addresses `http://127.0.0.1:5173` and `http://localhost:5173`
+(each keeps its own session).
+
+1. **Customer.** Sign in as `dana@example.com`. "My tickets" lists only Dana's
+   tickets. Open #1: you see the agent's reply and Dana's follow-up, but not the
+   internal note that exists on that ticket.
+2. **Agent.** In the other session, sign in as `ava.agent@example.com`. The list
+   shows every customer's open tickets, with filters for status, category,
+   priority and "assigned to me".
+3. **Live updates.** As Dana, click **New ticket** and submit one. It appears at
+   the top of Ava's list without a refresh.
+4. **Triage and suggestions.** Ava opens the new ticket. The side panel shows the
+   **Triage** box and **Similar resolved tickets**, each with its resolution and a
+   match score.
+5. **Working the ticket.** Ava presses **Assign to me**, sends a reply, then ticks
+   **Internal note** and adds a note. Dana's open ticket shows the assignment and
+   the reply live; the internal note never reaches Dana.
+6. **Resolve.** Ava sets the status to resolved, writes a resolution summary and
+   saves. Dana sees the status and the resolution appear.
+
+## Architecture
+
+```
+Browser (Vite + React + TypeScript, supabase-js, publishable key only)
+  |  sign-in (Supabase Auth, email + password)
+  |  tickets / messages / profiles (Data API, PostgREST)
+  |  live updates (Realtime, Postgres Changes)
+  |  similar tickets (rpc: public.similar_tickets)
+  |  triage (Edge Function, with the user's session)
+  v
+Postgres (row level security on every table)
+  ^
+  |  admin client: writes embedding, category, priority, triaged_at
+Edge Function "triage"
+  |  gte-small embeddings (built into Supabase Edge Functions)
+  |  Claude Haiku 4.5 (optional, via the Anthropic SDK)
+```
+
+### Data model (`supabase/migrations/`)
+
+- `profiles`: one row per auth user, `role` (`customer` or `agent`) and display
+  name. A trigger creates it at sign-up, always as a customer; the role is never
+  taken from user-supplied metadata.
+- `tickets`: customer, subject, body, status (`open`, `pending`, `resolved`),
+  category, priority, assignee, `embedding vector(384)`, `resolution` (an agent's
+  summary, shown in suggestions), `triaged_at`, timestamps.
+- `messages`: ticket, author, body, `is_internal`, timestamp.
+
+### Access rules
+
+Every table has row level security and one policy per command (select, insert,
+update, delete). Operations no client may perform have an explicit `false`
+policy.
+
+| | Customer | Agent |
+|---|---|---|
+| tickets | read and create own; new tickets must arrive untriaged (no status, category, priority, assignee or embedding set by the client) | read all; update all; assignee must be an agent |
+| messages | read public replies on own tickets; reply on own tickets | read all, including internal notes; post replies and internal notes on any ticket |
+| profiles | read own profile and agents' profiles | read all |
+| delete anything, edit messages, edit profiles | no | no |
+
+**Role checks.** Policies call `private.is_agent()`, a `SECURITY DEFINER`
+function in a schema the API does not expose. Because it runs as its owner, it
+reads `profiles` without re-entering the `profiles` policies (no recursion).
+Every policy calls it, and `auth.uid()`, wrapped in a sub-select:
+`(select private.is_agent())`. Postgres then evaluates it once per statement
+instead of once per row. A test fails if any policy calls either function
+without the wrapper. Scenario 4 of the troubleshooting lab shows what the
+unwrapped version costs. A role claim in the JWT (custom access token hook) was
+the alternative; it is fast too, but a role change would only apply once the
+user's token refreshes.
+
+**Live updates.** `tickets` and `messages` are in the `supabase_realtime`
+publication. Realtime checks every change against the subscriber's policies, so
+customers only receive events for rows they can read.
+
+**Keys.** The browser only ever has the publishable key, so every request runs
+as `anon` or `authenticated` and RLS applies. `src/lib/supabase.ts` refuses to
+start if the variable holds a secret key. The secret key is used only inside the
+Edge Function (injected by the platform) and never leaves the server.
+
+### Similar-ticket search
+
+`public.similar_tickets(ticket_id, match_count)` is a SQL function with
+`SECURITY INVOKER`: it runs with the caller's rights, so RLS applies to the
+source ticket and to every candidate. An agent gets matches from all resolved
+tickets; a customer only ever gets their own; asking about someone else's ticket
+returns nothing. It ranks by inner product (`<#>`), which equals cosine
+similarity for the normalized gte-small vectors.
 
 ## Ticket triage
 
@@ -59,6 +234,87 @@ fields until an agent sets them or presses **Re-run triage**.
 
 Tests for this path: `npm run test:unit` (the classification step with fake
 clients: API error, network error, refusal, unusable output) and
-`npm run check:triage-failure` (end to end against a functions server started
+`npm run check:triage-failure` (the whole path from a supabase-js client through the function to the database, against a functions server started
 with an invalid key; instructions at the top of
 `scripts/check-triage-failure.mjs`).
+
+## Tests
+
+```bash
+npm run test:db
+```
+
+Database tests with pgTAP (`supabase/tests/database/`): every policy's allowed
+and denied cases, the customer-cannot-change-triage-fields rule, the sign-up
+trigger, the seed, and `similar_tickets` access rules. **It resets the local
+database first** (the seed tests check exact counts), so it wipes local data;
+run `npm run embed:backfill` afterwards to restore suggestions.
+
+```bash
+npm run test:unit
+```
+
+Unit tests for the classification step (no stack needed).
+
+`npm run check:triage-failure` is the full-path check described under
+[Ticket triage](#ticket-triage).
+
+## Troubleshooting lab
+
+```bash
+npm run lab -- 1     # or 2, 3, 4, or all
+```
+
+Each scenario resets the local database, reproduces the problem, gathers the
+evidence, requires its test to fail, applies the fix, and requires the test to
+pass. Scenarios 3 and 4 load 50,000 extra synthetic tickets. **The lab wipes
+local data**; afterwards run `npm run test:db` and `npm run embed:backfill` to get
+the demo back. `npm run by-hand -- N` runs the steps a reader would paste into
+Studio's SQL editor. Write-ups, plans and timings: [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `npx supabase start` / `stop` | Start / stop the local stack (`stop` keeps the data) |
+| `npm run env:local` | Write `.env.local` from the running stack (URL + publishable key) |
+| `npm run embed:backfill` | Embed every ticket that has no embedding yet, through the triage function |
+| `npm run dev` | App at http://127.0.0.1:5173 |
+| `npm run build` / `npm run lint` | Type-check and build / oxlint |
+| `npm run test:db` | Reset the local database, then run the pgTAP suite |
+| `npm run test:unit` | Classification unit tests |
+| `npm run check:triage-failure` | Full-path check of a failing classifier (see the script header) |
+| `npm run lab -- N` | Run troubleshooting scenario N (resets the database) |
+| `npm run by-hand -- N` | Run scenario N's by-hand steps through Studio's SQL endpoint |
+| `npm run sql -- file.sql` | Run a SQL file against the local database, statement by statement |
+| `npm run gen:types` | Regenerate `src/lib/database.types.ts` from the local schema |
+
+## Project layout
+
+```
+src/                         React app (components/, lib/supabase.ts, lib/session.ts, lib/realtime.ts)
+supabase/migrations/         schema, policies, similar_tickets
+supabase/seed.sql            synthetic demo data
+supabase/tests/database/     pgTAP tests
+supabase/functions/triage/   Edge Function (index.ts), classification (classify.ts) and its tests
+scripts/                     sql runner, env writer, embedding backfill, triage failure check
+lab/                         troubleshooting scenarios, runner, evidence logs
+TROUBLESHOOTING.md           the four write-ups
+```
+
+## Limitations
+
+- Sign-in is email and password only, and there is one way to become an agent:
+  an update to `profiles` in the database.
+- Agents cannot open tickets for customers, and nobody can delete tickets or edit
+  messages through the API.
+- A ticket inserted straight through the API, without the app calling `triage`,
+  stays untriaged until an agent presses **Run triage** or the backfill runs.
+- gte-small handles English only and reads at most 512 tokens. Its similarity
+  scores sit close together, and no cut-off is applied, so a ticket with no real
+  precedent still gets three suggestions.
+- `similar_tickets` scans resolved tickets without a vector index; fine at this
+  size, an HNSW index would be the next step for a large table.
+- The ticket list re-fetches its page of 50 on every change event.
+- The project runs on the local stack only; it has not been deployed to a hosted
+  Supabase project.

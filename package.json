@@ -15,7 +15,8 @@
     "lab": "node lab/run.mjs",
     "by-hand": "node lab/common/by-hand.mjs",
     "test:unit": "node --test supabase/functions/triage/classify.test.ts",
-    "check:triage-failure": "node scripts/check-triage-failure.mjs"
+    "check:triage-failure": "node scripts/check-triage-failure.mjs",
+    "env:local": "node scripts/write-env-local.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
