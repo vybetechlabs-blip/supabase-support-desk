@@ -29,8 +29,9 @@ Built with Claude Code; the troubleshooting write-ups were verified by hand.
 
 ## Requirements
 
-- **Node.js 22.18 or newer** (Vite 8 needs 20.19+ or 22.12+; the unit tests run
-  TypeScript directly, which needs 22.18+).
+- **Node.js.** Developed and tested on Node 24.16. The stated minimum is 22.18
+  (Vite 8 needs 20.19+ or 22.12+, and the unit tests run TypeScript directly,
+  which needs 22.18+); that minimum has not been tested.
 - **Docker Desktop**, or another Docker-compatible runtime, running. The local
   Supabase stack runs in containers.
 
@@ -64,7 +65,8 @@ npm run dev
   it: everything prefixed `VITE_` is shipped to the browser.)
 - `npm run embed:backfill` computes embeddings for the 40 seeded tickets, so
   similar-ticket suggestions work. It calls the `triage` Edge Function as a
-  seeded agent.
+  seeded agent. Seeded tickets already have a category and priority, so no
+  model call is made for them even when a key is set.
 - `npm run dev` serves the app at **http://127.0.0.1:5173**.
 
 Local services: API `http://127.0.0.1:54321`, Studio `http://127.0.0.1:54323`,
@@ -140,8 +142,12 @@ Edge Function "triage"
   taken from user-supplied metadata.
 - `tickets`: customer, subject, body, status (`open`, `pending`, `resolved`),
   category, priority, assignee, `embedding vector(384)`, `resolution` (an agent's
-  summary, shown in suggestions), `triaged_at`, timestamps.
+  summary, shown in suggestions), `triaged_at`, `triage_outcome`, timestamps.
 - `messages`: ticket, author, body, `is_internal`, timestamp.
+
+`created_at` (and `updated_at` on tickets) are set by the server when a client
+inserts a row, whatever the request sends, so a ticket cannot be future-dated to
+the top of the agent list and a reply cannot be backdated.
 
 ### Access rules
 
@@ -151,7 +157,7 @@ policy.
 
 | | Customer | Agent |
 |---|---|---|
-| tickets | read and create own; new tickets must arrive untriaged (no status, category, priority, assignee or embedding set by the client) | read all; update all; assignee must be an agent |
+| tickets | read and create own; a new ticket must arrive open and untriaged (the client cannot set category, priority, assignee, embedding, resolution, triaged_at or triage_outcome) | read all; update any column; assignee must be an agent |
 | messages | read public replies on own tickets; reply on own tickets | read all, including internal notes; post replies and internal notes on any ticket |
 | profiles | read own profile and agents' profiles | read all |
 | delete anything, edit messages, edit profiles | no | no |
@@ -196,10 +202,17 @@ When a customer submits a ticket, the app calls the `triage` Edge Function
    Supabase Edge Functions (no key needed);
 3. asks Claude Haiku 4.5 (`claude-haiku-4-5`) for a category and a priority, if
    `ANTHROPIC_API_KEY` is set, and fills in whichever of the two is still empty.
-   It never overwrites a value an agent already set.
+   It never overwrites a value an agent already set, and when both are already
+   set it makes no model call at all;
+4. records what happened in `triage_outcome`: `classified`, `no_key`, `failed`
+   or `skipped` (both fields were already set), and sets `triaged_at`.
 
-Agents see a **Triage** box on each ticket with a **Run triage** / **Re-run triage**
-button. Only agents can re-run it; for customers the function returns 403.
+`triaged_at` is set on every run, whatever the outcome: it is what limits a
+customer to one triage run per ticket.
+
+Agents see a **Triage** box on each ticket: when triage ran, its recorded outcome,
+and a **Run triage** / **Re-run triage** button. Only agents can re-run it; for
+customers the function returns 403.
 
 **With `ANTHROPIC_API_KEY` set** (in `supabase/functions/.env`, then restart the
 local stack), a new ticket arrives classified. Observed on the local stack on
@@ -223,17 +236,24 @@ key (Anthropic answered `401 authentication_error`):
   nothing about the failure.
 - The function answered 200 with `classifier: "error"` and
   `note: "Anthropic API 401"`. The ticket got its 384-dimension embedding, its
-  category and priority stayed empty, and it was marked triaged.
+  category and priority stayed empty, it was marked triaged, and
+  `triage_outcome` was recorded as `failed`.
 - Similar-ticket suggestions worked, because they only need the embedding.
 - An agent's **Re-run triage** showed "Embedding stored. Classification failed
   (Anthropic API 401)." After the normal key was restored, the same button
   classified the ticket.
 
 Nothing retries automatically: a ticket triaged during an outage keeps empty
-fields until an agent sets them or presses **Re-run triage**.
+fields until an agent sets them or presses **Re-run triage**. Its Triage box
+says the classification failed.
+
+In the same run, after the agent set category and priority by hand, **Re-run
+triage** returned `skipped`: the embedding was stored again, no model call was
+made (the functions log showed 2 failed calls for 3 triage runs), and the
+agent's values were kept.
 
 Tests for this path: `npm run test:unit` (the classification step with fake
-clients: API error, network error, refusal, unusable output) and
+clients: API error, network error, refusal, unusable output, the skip rule) and
 `npm run check:triage-failure` (the whole path from a supabase-js client through the function to the database, against a functions server started
 with an invalid key; instructions at the top of
 `scripts/check-triage-failure.mjs`).
@@ -244,17 +264,35 @@ with an invalid key; instructions at the top of
 npm run test:db
 ```
 
-Database tests with pgTAP (`supabase/tests/database/`): every policy's allowed
-and denied cases, the customer-cannot-change-triage-fields rule, the sign-up
-trigger, the seed, and `similar_tickets` access rules. **It resets the local
-database first** (the seed tests check exact counts), so it wipes local data;
-run `npm run embed:backfill` afterwards to restore suggestions.
+Database tests with pgTAP (`supabase/tests/database/`, 96 assertions in 9 files):
+
+- RLS is enabled on every table, every table has a policy for select, insert,
+  update and delete, and no policy calls `auth.uid()` or the role check outside a
+  `(select ...)` wrapper.
+- For each operation a client may perform (reading tickets, messages and
+  profiles; creating tickets and messages; agents updating tickets), the allowed
+  case and the denied cases: other customers' rows, internal notes, signed-out
+  visitors, posting as someone else.
+- Operations no client may perform (deleting anything, editing messages,
+  inserting or editing profiles) have explicit `false` policies, so they have
+  denied cases only.
+- A customer cannot set or change status, category, priority, assignee,
+  embedding, resolution, triaged_at or triage_outcome; timestamps are set by the
+  server on client inserts.
+- The sign-up trigger: a role claimed in user metadata is ignored, and an
+  over-long display name is cut to 100 characters instead of failing sign-up.
+- `similar_tickets` returns only rows the caller may read; the seed loads.
+
+**It resets the local database first** (the seed tests check exact counts), so
+it wipes local data; run `npm run embed:backfill` afterwards to restore
+suggestions.
 
 ```bash
 npm run test:unit
 ```
 
-Unit tests for the classification step (no stack needed).
+Unit tests (10) for the classification step: failure handling, the outcome
+mapping and the skip rule (no stack needed).
 
 `npm run check:triage-failure` is the full-path check described under
 [Ticket triage](#ticket-triage).
@@ -316,5 +354,16 @@ TROUBLESHOOTING.md           the four write-ups
 - `similar_tickets` scans resolved tickets without a vector index; fine at this
   size, an HNSW index would be the next step for a large table.
 - The ticket list re-fetches its page of 50 on every change event.
+- There is no rate limit on classifier calls: with a key set, every new ticket
+  costs one model call, triggered from the customer's browser (customers cannot
+  re-run triage, and a ticket is triaged once).
+- Priority is a suggestion made from customer-written text; an agent can change
+  it, and should treat it as a starting point.
+- Agents can edit any ticket column through the API, including the triage
+  fields; only the assignee is checked (it must be an agent).
+- `supabase/seed.sql` writes directly into the `auth.users` and `auth.identities`
+  tables, which the Supabase docs do not cover. It works with the pinned CLI
+  version (`supabase` 2.119.0, exact in `package.json`); a later Auth schema change
+  could break it.
 - The project runs on the local stack only; it has not been deployed to a hosted
   Supabase project.
