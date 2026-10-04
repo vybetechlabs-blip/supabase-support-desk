@@ -24,8 +24,9 @@ Docker Desktop 4.93.0 and Postgres 17.11) and vary from run to run; one run in
 this recording took 22.81 ms where its neighbours took about 13. Expect your
 timings to differ. Plan shapes, row counts, call counts, buffer counts and the
 planner's estimates should match, with one exception explained in scenario 3
-(about 56 extra buffers the first time a statement runs in a new database
-session). The estimates match because the lab data raises the statistics target
+(a few dozen extra buffers the first time a statement runs in a new database
+session: 55 to 58 in our runs, so a figure that includes them can differ by a
+page or two from the one printed here). The estimates match because the lab data raises the statistics target
 on `tickets.status` to 200, so `ANALYZE` reads the whole table instead of a
 random 30,000-row sample (see `lab/common/bulk-seed.sql`).
 
@@ -471,7 +472,8 @@ Load the broken state: `npx supabase db reset`, then
    Why the scan shows 1,170 buffers here and 1,117 in the (API) plan: the table
    is 1,114 pages either way. The role check (`(select private.is_agent())`)
    runs once per statement, and the first time it runs in a **new database
-   session**, Postgres reads about 56 pages of system catalog to load metadata
+   session**, Postgres reads 55 to 58 pages of system catalog (it varied between
+   our runs) to load metadata
    into that session's cache; those reads are counted under the scan. The plan
    above came from a request that Studio's endpoint ran in a new session (the
    InitPlan line shows the 56); the (API) request reused a warm session.
