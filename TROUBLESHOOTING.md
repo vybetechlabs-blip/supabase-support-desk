@@ -25,8 +25,9 @@ this recording took 22.81 ms where its neighbours took about 13. Expect your
 timings to differ. Plan shapes, row counts, call counts, buffer counts and the
 planner's estimates should match, with one exception explained in scenario 3
 (a few dozen extra buffers the first time a statement runs in a new database
-session: 55 to 58 in our runs, so a figure that includes them can differ by a
-page or two from the one printed here). The estimates match because the lab data raises the statistics target
+session: 55 to 58 in our by-hand runs, so a figure that includes them can differ
+by a page or two from the one printed here; an (API) figure can carry the same
+extra reads when PostgREST happens to open a new database connection). The estimates match because the lab data raises the statistics target
 on `tickets.status` to 200, so `ANALYZE` reads the whole table instead of a
 random 30,000-row sample (see `lab/common/bulk-seed.sql`).
 
@@ -539,7 +540,9 @@ in the `Filter` line of the app's plan: the policy was added to the query, and
 plan, where the role check shows up as `(InitPlan 2).col1`, a value computed
 once and reused. The buffer count tells the same story: 22,779 buffers for the
 app's request against 1,114 for the table owner, because every row's role check
-looks up the caller in `profiles`.
+looks up the caller in `profiles`. (A fresh-clone run of the same lab recorded
+22,845 here, 66 more; that is consistent with the new-session catalog reads
+described in scenario 3, though we did not check that request's connection.)
 
 The policy explains why:
 
