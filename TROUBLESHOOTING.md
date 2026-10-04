@@ -60,8 +60,9 @@ To capture (API) plans, the lab turns on PostgREST's plan output for the local
 database only
 (`alter role authenticator in database postgres set pgrst.db_plan_enabled to 'true'`).
 The next `supabase db reset` removes it. Do not turn it on in production; the
-Supabase docs ("Debugging performance issues") explain how to restrict it if you
-ever need it there.
+Supabase docs page
+[Debugging performance issues](https://supabase.com/docs/guides/database/debugging-performance)
+explains how to restrict it if you ever need it there.
 
 | # | Reported problem | Cause | Fix |
 |---|---|---|---|
@@ -583,8 +584,9 @@ create policy "tickets: customers read own, agents read all"
 
 Same logic, same rows. Wrapping each call in `(select ...)` lets Postgres plan
 it as an InitPlan, run it once per statement, and reuse the value for every
-row. This is the pattern the Supabase RLS performance guide recommends for
-`auth.uid()`, `auth.jwt()` and security definer helpers.
+row. This is the pattern the "RLS performance recommendations" section of the
+Supabase [Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
+guide recommends for `auth.uid()`, `auth.jwt()` and security definer helpers.
 
 ### After the fix (API)
 
