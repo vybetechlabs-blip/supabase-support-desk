@@ -32,3 +32,9 @@ supabase/functions/.env
 
 # Lab output scratch
 lab/out/
+
+# Supabase CLI runtime state. `supabase start` copies function secrets into
+# supabase/.temp/start-secrets/; supabase/.gitignore already excludes .temp, this
+# repeats it at the root so it stays excluded even if that file changes.
+supabase/.temp/
+supabase/.branches/
