@@ -59,7 +59,7 @@ psql or Deno install is needed.
 ## Setup from a fresh clone
 
 ```bash
-git clone <this-repo> supabase-support-desk
+git clone https://github.com/vybetechlabs-blip/supabase-support-desk.git
 cd supabase-support-desk
 npm install
 npx supabase start
