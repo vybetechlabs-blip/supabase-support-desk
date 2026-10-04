@@ -4,6 +4,7 @@ export type TriageResult = {
   ticket_id: number
   embedding_dimensions?: number
   classifier?: 'claude-haiku-4-5' | 'stub' | 'error'
+  outcome?: 'classified' | 'no_key' | 'failed'
   category?: string | null
   priority?: string | null
   note?: string

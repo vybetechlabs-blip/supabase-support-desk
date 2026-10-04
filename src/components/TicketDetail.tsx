@@ -29,7 +29,7 @@ export function TicketDetail({ ticketId, profile }: { ticketId: number; profile:
       .from('tickets')
       .select(
         // Every column except the 384-number embedding, which the browser never needs.
-        'id, customer_id, subject, body, status, category, priority, assignee_id, resolution, triaged_at, created_at, updated_at,' +
+        'id, customer_id, subject, body, status, category, priority, assignee_id, resolution, triaged_at, triage_outcome, created_at, updated_at,' +
           ' customer:profiles!tickets_customer_id_fkey(display_name), assignee:profiles!tickets_assignee_id_fkey(display_name)',
       )
       .eq('id', ticketId)
@@ -223,6 +223,13 @@ function AgentControls({ ticket, profile, onSaved }: { ticket: TicketView; profi
   )
 }
 
+// What the last triage run did with the classifier (tickets.triage_outcome).
+const OUTCOME_TEXT: Record<string, string> = {
+  classified: 'Classification: category and priority suggested by the model.',
+  no_key: 'Classification: not run (no ANTHROPIC_API_KEY). Set category and priority by hand.',
+  failed: 'Classification: failed. Set category and priority by hand, or re-run triage.',
+}
+
 function TriageBox({ ticket, onDone }: { ticket: TicketView; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
@@ -244,6 +251,7 @@ function TriageBox({ ticket, onDone }: { ticket: TicketView; onDone: () => void 
       <p className="muted">
         {ticket.triaged_at ? `Triaged ${new Date(ticket.triaged_at).toLocaleString()}` : 'Not triaged yet.'}
       </p>
+      {ticket.triage_outcome && <p data-testid="triage-outcome">{OUTCOME_TEXT[ticket.triage_outcome] ?? ticket.triage_outcome}</p>}
       {result && <p>{result}</p>}
       <button className="secondary" onClick={run} disabled={busy}>
         {busy ? 'Running…' : ticket.triaged_at ? 'Re-run triage' : 'Run triage'}

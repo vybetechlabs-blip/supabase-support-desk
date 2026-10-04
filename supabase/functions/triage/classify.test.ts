@@ -3,7 +3,7 @@
 // TypeScript files directly by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyTicket, SYSTEM_PROMPT, type MessagesClient } from './classify.ts'
+import { classifyTicket, outcomeOf, SYSTEM_PROMPT, type MessagesClient } from './classify.ts'
 
 const reply = (text: string, stop_reason = 'end_turn'): MessagesClient => ({
   messages: { create: async () => ({ stop_reason, content: [{ type: 'text', text }] }) },
@@ -75,4 +75,10 @@ test('success: category and priority returned', async () => {
 test('prompt names the invented product, not a real one', () => {
   assert.match(SYSTEM_PROMPT, /\bBrannoway\b/)
   assert.doesNotMatch(SYSTEM_PROMPT, /tallybook/i)
+})
+
+test('outcomeOf maps each classifier result to the stored triage_outcome', () => {
+  assert.equal(outcomeOf({ classifier: 'claude-haiku-4-5', category: 'bug', priority: 'high' }), 'classified')
+  assert.equal(outcomeOf({ classifier: 'stub', category: null, priority: null }), 'no_key')
+  assert.equal(outcomeOf({ classifier: 'error', category: null, priority: null, note: 'Anthropic API 401' }), 'failed')
 })

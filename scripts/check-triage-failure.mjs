@@ -54,7 +54,7 @@ check('classifier reports a failure, not a classification', first.data?.classifi
 
 const sql = postgres(DB_URL, { max: 1 })
 const [row] = await sql`
-  select category, priority, triaged_at is not null as triaged,
+  select category, priority, triaged_at is not null as triaged, triage_outcome,
          case when embedding is null then null else vector_dims(embedding) end as dims
   from public.tickets where id = ${ticket.id}`
 await sql.end()
@@ -62,6 +62,7 @@ check('ticket still exists', !!row)
 check('embedding stored (384 dimensions)', row?.dims === 384, `dims=${row?.dims}`)
 check('category and priority left empty', row?.category === null && row?.priority === null, `${row?.category} / ${row?.priority}`)
 check('ticket marked triaged', row?.triaged === true)
+check('outcome recorded as failed', row?.triage_outcome === 'failed', `triage_outcome=${row?.triage_outcome}`)
 
 const agent = await signIn('ava.agent@example.com')
 const rerun = await agent.functions.invoke('triage', { body: { ticket_id: ticket.id, force: true } })

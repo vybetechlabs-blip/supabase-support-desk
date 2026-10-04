@@ -9,7 +9,7 @@ import '@supabase/functions-js/edge-runtime.d.ts'
 import { withSupabase } from '@supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 
-import { classifyTicket } from './classify.ts'
+import { classifyTicket, outcomeOf } from './classify.ts'
 
 // Built-in embedding model (gte-small, 384 dimensions). Created once per worker.
 const embedder = new Supabase.ai.Session('gte-small')
@@ -57,9 +57,12 @@ export default {
     const result = await classifyTicket(anthropicClient(), ticket.subject, ticket.body)
 
     // Never overwrite a category or priority an agent already set.
+    const outcome = outcomeOf(result)
+    // triaged_at is set whatever the outcome: it is the once-per-ticket gate above.
     const update: Record<string, unknown> = {
       embedding: JSON.stringify(embedding),
       triaged_at: new Date().toISOString(),
+      triage_outcome: outcome,
     }
     if (!ticket.category && result.category) update.category = result.category
     if (!ticket.priority && result.priority) update.priority = result.priority
@@ -71,6 +74,7 @@ export default {
       ticket_id: ticketId,
       embedding_dimensions: embedding.length,
       classifier: result.classifier,
+      outcome,
       category: update.category ?? ticket.category,
       priority: update.priority ?? ticket.priority,
       ...(result.note ? { note: result.note } : {}),

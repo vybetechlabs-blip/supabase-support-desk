@@ -14,6 +14,15 @@ export type Classification = {
   note?: string
 }
 
+// Stored in tickets.triage_outcome (see migration 20261004000500).
+export type TriageOutcome = 'classified' | 'no_key' | 'failed'
+
+export function outcomeOf(result: Classification): TriageOutcome {
+  if (result.classifier === 'stub') return 'no_key'
+  if (result.classifier === 'error') return 'failed'
+  return 'classified'
+}
+
 // The one method of the Anthropic SDK client this module uses.
 export type MessagesClient = {
   messages: {

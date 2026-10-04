@@ -45,13 +45,13 @@ isOneToOne: false
                   ]
                 },"tickets": {
                   Row: {
-                    "assignee_id": string | null,"body": string,"category": string | null,"created_at": string,"customer_id": string,"embedding": string | null,"id": number,"priority": string | null,"resolution": string | null,"status": string,"subject": string,"triaged_at": string | null,"updated_at": string
+                    "assignee_id": string | null,"body": string,"category": string | null,"created_at": string,"customer_id": string,"embedding": string | null,"id": number,"priority": string | null,"resolution": string | null,"status": string,"subject": string,"triage_outcome": string | null,"triaged_at": string | null,"updated_at": string
                   }
                   Insert: {
-                    "assignee_id"?: string | null,"body": string,"category"?: string | null,"created_at"?: string,"customer_id"?: string,"embedding"?: string | null,"id"?: never,"priority"?: string | null,"resolution"?: string | null,"status"?: string,"subject": string,"triaged_at"?: string | null,"updated_at"?: string
+                    "assignee_id"?: string | null,"body": string,"category"?: string | null,"created_at"?: string,"customer_id"?: string,"embedding"?: string | null,"id"?: never,"priority"?: string | null,"resolution"?: string | null,"status"?: string,"subject": string,"triage_outcome"?: string | null,"triaged_at"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "assignee_id"?: string | null,"body"?: string,"category"?: string | null,"created_at"?: string,"customer_id"?: string,"embedding"?: string | null,"id"?: never,"priority"?: string | null,"resolution"?: string | null,"status"?: string,"subject"?: string,"triaged_at"?: string | null,"updated_at"?: string
+                    "assignee_id"?: string | null,"body"?: string,"category"?: string | null,"created_at"?: string,"customer_id"?: string,"embedding"?: string | null,"id"?: never,"priority"?: string | null,"resolution"?: string | null,"status"?: string,"subject"?: string,"triage_outcome"?: string | null,"triaged_at"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
