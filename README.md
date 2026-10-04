@@ -14,6 +14,24 @@ the fix and passes after.
 
 Built with Claude Code; the troubleshooting write-ups were verified by hand.
 
+## Screenshots
+
+Local stack with the demo data, captured 2026-10-04.
+
+**Agent ticket list.** Every customer's open tickets, with filters.
+
+![Agent ticket list with status, category and priority filters](docs/screenshots/agent-ticket-list.jpg)
+
+**Agent view of a new ticket.** The customer's ticket was classified on creation
+(performance / high); the Triage box shows the recorded outcome, and the
+Similar resolved tickets panel lists earlier tickets with their resolutions.
+
+![Ticket detail with agent controls, Triage box and similar resolved tickets](docs/screenshots/agent-ticket-triage.jpg)
+
+**Customer view.** A customer sees only their own tickets.
+
+![Customer's own ticket list](docs/screenshots/customer-tickets.jpg)
+
 ## Contents
 
 - [Requirements](#requirements)
