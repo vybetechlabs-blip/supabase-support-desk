@@ -1,4 +1,4 @@
-# Lab scenario 1: 01-policy-leak  (2026-10-04T04:31:46.508Z)
+# Lab scenario 1: 01-policy-leak  (2026-10-04T09:24:30.526Z)
 
 ##### Reset local database
 $ npx supabase db reset --local
@@ -76,7 +76,7 @@ Test Summary Report
 -------------------
 /AI_WORK/Projects/supabase-support-desk/lab/01-policy-leak/test.sql                  (Wstat: 0 Tests: 3 Failed: 2)
   Failed tests:  1-2
-Files=2, Tests=4,  1 wallclock secs ( 0.02 usr  0.01 sys +  0.01 cusr  0.01 csys =  0.05 CPU)
+Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.02 cusr  0.00 csys =  0.05 CPU)
 Result: FAIL
 Connecting to local database...
 psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
@@ -130,7 +130,7 @@ $ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab
 /AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
 /AI_WORK/Projects/supabase-support-desk/lab/01-policy-leak/test.sql .................... ok
 All tests successful.
-Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.00 sys +  0.01 cusr  0.00 csys =  0.03 CPU)
+Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.00 sys +  0.02 cusr  0.00 csys =  0.04 CPU)
 Result: PASS
 Connecting to local database...
 psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping

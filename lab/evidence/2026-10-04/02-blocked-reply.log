@@ -1,4 +1,4 @@
-# Lab scenario 2: 02-blocked-reply  (2026-10-04T04:32:26.488Z)
+# Lab scenario 2: 02-blocked-reply  (2026-10-04T09:25:11.392Z)
 
 ##### Reset local database
 $ npx supabase db reset --local
@@ -22,7 +22,7 @@ CREATE POLICY
 
 ##### DIAGNOSE (before fix)
 $ node lab/02-blocked-reply/diagnose.mjs
-customer dana@example.com (9e559e4a-eb37-4537-ac30-bb7a1de5be2a) replies on her own ticket #9 "Upgrade did not unlock recurring invoices" (assignee_id: a8ae1741-5a7a-4897-a39c-42e52f485fa6)
+customer dana@example.com (eafa9170-84d8-4635-956b-93dbc8d994c2) replies on her own ticket #9 "Upgrade did not unlock recurring invoices" (assignee_id: 5f029bd9-0180-405a-8984-da898694675e)
 
 === 1. What the client receives ===
 HTTP 403 Forbidden
@@ -97,7 +97,7 @@ Test Summary Report
 -------------------
 /AI_WORK/Projects/supabase-support-desk/lab/02-blocked-reply/test.sql                (Wstat: 0 Tests: 4 Failed: 1)
   Failed test:  1
-Files=2, Tests=5,  0 wallclock secs ( 0.03 usr  0.00 sys +  0.01 cusr  0.01 csys =  0.05 CPU)
+Files=2, Tests=5,  0 wallclock secs ( 0.03 usr  0.00 sys +  0.02 cusr  0.01 csys =  0.06 CPU)
 Result: FAIL
 Connecting to local database...
 psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
@@ -113,7 +113,7 @@ CREATE POLICY
 
 ##### DIAGNOSE (after fix)
 $ node lab/02-blocked-reply/diagnose.mjs
-customer dana@example.com (9e559e4a-eb37-4537-ac30-bb7a1de5be2a) replies on her own ticket #9 "Upgrade did not unlock recurring invoices" (assignee_id: a8ae1741-5a7a-4897-a39c-42e52f485fa6)
+customer dana@example.com (eafa9170-84d8-4635-956b-93dbc8d994c2) replies on her own ticket #9 "Upgrade did not unlock recurring invoices" (assignee_id: 5f029bd9-0180-405a-8984-da898694675e)
 
 === 1. What the client receives ===
 HTTP 201 Created
@@ -176,7 +176,7 @@ $ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab
 /AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
 /AI_WORK/Projects/supabase-support-desk/lab/02-blocked-reply/test.sql .................. ok
 All tests successful.
-Files=2, Tests=5,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.01 cusr  0.01 csys =  0.05 CPU)
+Files=2, Tests=5,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.01 cusr  0.00 csys =  0.04 CPU)
 Result: PASS
 Connecting to local database...
 psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping

@@ -1,4 +1,4 @@
-# Lab scenario 4: 04-slow-policy  (2026-10-04T04:33:47.954Z)
+# Lab scenario 4: 04-slow-policy  (2026-10-04T09:26:35.549Z)
 
 ##### Reset local database
 $ npx supabase db reset --local
@@ -14,6 +14,7 @@ $ node scripts/sql.mjs lab/common/bulk-seed.sql
 INSERT 1000
 (0 rows)
 INSERT 50000
+ALTER TABLE
 ANALYZE
 ANALYZE
 ┌─────────┬───────────────┬────────┬─────────┬──────────┐
@@ -43,39 +44,39 @@ CREATE POLICY
 $ node lab/04-slow-policy/diagnose.mjs
 
 === Same question in the SQL editor (role postgres, RLS bypassed) ===
-Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=5.239..5.240 rows=1 loops=1)
+Aggregate  (cost=1757.55..1757.56 rows=1 width=8) (actual time=5.998..6.000 rows=1 loops=1)
   Buffers: shared hit=1114
-  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.009..4.971 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7220 width=0) (actual time=0.008..5.677 rows=7220 loops=1)
         Filter: (category = 'billing'::text)
         Rows Removed by Filter: 42820
         Buffers: shared hit=1114
-Planning Time: 0.051 ms
-Execution Time: 5.264 ms
-Execution Time over 7 runs (ms): 5.264, 5.517, 5.972, 5.416, 5.46, 5.588, 5.389
-median: 5.46 ms
+Planning Time: 0.046 ms
+Execution Time: 6.023 ms
+Execution Time over 7 runs (ms): 6.023, 6.158, 6.081, 5.421, 5.447, 8.681, 5.882
+median: 6.023 ms
 
 === From the app as agent ava.agent@example.com (API request, RLS applies) ===
 API count result: 7220
-Aggregate  (cost=15512.97..15512.99 rows=1 width=144) (actual time=159.121..159.122 rows=1 loops=1)
+Aggregate  (cost=15512.97..15512.99 rows=1 width=144) (actual time=169.489..169.490 rows=1 loops=1)
   Buffers: shared hit=22779
   InitPlan 1
-    ->  Aggregate  (cost=15506.52..15506.53 rows=1 width=8) (actual time=158.962..158.963 rows=1 loops=1)
+    ->  Aggregate  (cost=15506.53..15506.54 rows=1 width=8) (actual time=169.275..169.275 rows=1 loops=1)
           Buffers: shared hit=22774
-          ->  Seq Scan on tickets tickets_1  (cost=0.00..15500.50 rows=2407 width=0) (actual time=0.111..157.834 rows=7220 loops=1)
+          ->  Seq Scan on tickets tickets_1  (cost=0.00..15500.50 rows=2411 width=0) (actual time=0.153..168.159 rows=7220 loops=1)
                 Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
                 Rows Removed by Filter: 42820
                 Buffers: shared hit=22774
-  ->  Limit  (cost=0.00..6.44 rows=1 width=8) (actual time=0.149..0.150 rows=1 loops=1)
+  ->  Limit  (cost=0.00..6.43 rows=1 width=8) (actual time=0.205..0.206 rows=1 loops=1)
         Buffers: shared hit=5
-        ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2407 width=8) (actual time=0.148..0.148 rows=1 loops=1)
+        ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2411 width=8) (actual time=0.204..0.205 rows=1 loops=1)
               Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
               Rows Removed by Filter: 5
               Buffers: shared hit=5
-Planning Time: 0.248 ms
-Execution Time: 159.183 ms
+Planning Time: 0.312 ms
+Execution Time: 169.546 ms
 
-Execution Time over 7 runs (ms): 159.183, 160.756, 146.081, 147.166, 150.391, 150.374, 150.148
-median: 150.374 ms
+Execution Time over 7 runs (ms): 169.546, 151.631, 153.628, 176.137, 159.829, 178.926, 183.237
+median: 169.546 ms
 
 === Policy on public.tickets for SELECT (pg_policies) ===
 tickets: customers read own, agents read all
@@ -90,46 +91,46 @@ $ node lab/common/by-hand.mjs lab/04-slow-policy/by-hand.sql --runs 7
 by hand: lab/04-slow-policy/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
 
 --- Step 1: the count as the table owner (the SQL editor's default; RLS bypassed)
-Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=6.406..6.408 rows=1 loops=1)
+Aggregate  (cost=1757.55..1757.56 rows=1 width=8) (actual time=6.627..6.628 rows=1 loops=1)
   Buffers: shared hit=1114
-  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.011..6.057 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7220 width=0) (actual time=0.007..6.330 rows=7220 loops=1)
         Filter: (category = 'billing'::text)
         Rows Removed by Filter: 42820
         Buffers: shared hit=1114
 Planning:
-  Buffers: shared hit=121
-Planning Time: 0.345 ms
-Execution Time: 6.590 ms
-Execution Time over 7 runs after 1 warm-up (ms): 6.59, 6.263, 6.134, 6.308, 6.381, 6.189, 6.497
-median: 6.308 ms
+  Buffers: shared hit=120
+Planning Time: 0.261 ms
+Execution Time: 6.728 ms
+Execution Time over 7 runs after 1 warm-up (ms): 6.728, 6.373, 6.438, 6.208, 6.336, 7.556, 10.178
+median: 6.438 ms
 
 --- Step 2: the same count as ava.agent@example.com (agent), with minimal JWT claims
-Aggregate  (cost=15506.52..15506.53 rows=1 width=8) (actual time=84.976..84.977 rows=1 loops=1)
+Aggregate  (cost=15506.53..15506.54 rows=1 width=8) (actual time=97.599..97.600 rows=1 loops=1)
   Buffers: shared hit=22831
-  ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2407 width=0) (actual time=0.332..83.968 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2411 width=0) (actual time=0.616..96.527 rows=7220 loops=1)
         Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
         Rows Removed by Filter: 42820
         Buffers: shared hit=22831
 Planning:
-  Buffers: shared hit=163
-Planning Time: 0.393 ms
-Execution Time: 85.076 ms
-Execution Time over 7 runs after 1 warm-up (ms): 85.076, 86.279, 85.747, 88.898, 85.943, 89.213, 85.269
-median: 85.943 ms
+  Buffers: shared hit=162
+Planning Time: 1.100 ms
+Execution Time: 97.730 ms
+Execution Time over 7 runs after 1 warm-up (ms): 97.73, 115.324, 106.564, 96.278, 90.676, 110.081, 88.727
+median: 97.73 ms
 
 --- Step 3: the same count with claims the size of a real session token.
-Aggregate  (cost=15506.52..15506.53 rows=1 width=8) (actual time=189.380..189.380 rows=1 loops=1)
+Aggregate  (cost=15506.53..15506.54 rows=1 width=8) (actual time=164.147..164.148 rows=1 loops=1)
   Buffers: shared hit=22831
-  ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2407 width=0) (actual time=0.464..187.890 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..15500.50 rows=2411 width=0) (actual time=0.580..162.939 rows=7220 loops=1)
         Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
         Rows Removed by Filter: 42820
         Buffers: shared hit=22831
 Planning:
-  Buffers: shared hit=163
-Planning Time: 0.496 ms
-Execution Time: 189.519 ms
-Execution Time over 7 runs after 1 warm-up (ms): 189.519, 148.704, 148.322, 151.015, 156.427, 157.039, 150.194
-median: 151.015 ms
+  Buffers: shared hit=162
+Planning Time: 0.523 ms
+Execution Time: 164.320 ms
+Execution Time over 7 runs after 1 warm-up (ms): 164.32, 186.372, 183.614, 178.214, 158.33, 169.37, 170.408
+median: 170.408 ms
 
 --- Step 4: as the agent, how many times does private.is_agent() run for that one count?
 ┌─────────┬────────────────┐
@@ -161,7 +162,7 @@ Test Summary Report
 -------------------
 /AI_WORK/Projects/supabase-support-desk/lab/04-slow-policy/test.sql                  (Wstat: 0 Tests: 3 Failed: 1)
   Failed test:  3
-Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.00 sys +  0.02 cusr  0.00 csys =  0.04 CPU)
+Files=2, Tests=4,  0 wallclock secs ( 0.01 usr  0.02 sys +  0.02 cusr  0.01 csys =  0.06 CPU)
 Result: FAIL
 Connecting to local database...
 psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
@@ -179,49 +180,49 @@ CREATE POLICY
 $ node lab/04-slow-policy/diagnose.mjs
 
 === Same question in the SQL editor (role postgres, RLS bypassed) ===
-Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=5.456..5.457 rows=1 loops=1)
+Aggregate  (cost=1757.55..1757.56 rows=1 width=8) (actual time=5.272..5.273 rows=1 loops=1)
   Buffers: shared hit=1114
-  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.008..5.164 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7220 width=0) (actual time=0.011..5.007 rows=7220 loops=1)
         Filter: (category = 'billing'::text)
         Rows Removed by Filter: 42820
         Buffers: shared hit=1114
-Planning Time: 0.045 ms
-Execution Time: 5.480 ms
-Execution Time over 7 runs (ms): 5.48, 5.939, 5.328, 5.453, 5.356, 5.304, 5.084
-median: 5.356 ms
+Planning Time: 0.071 ms
+Execution Time: 5.306 ms
+Execution Time over 7 runs (ms): 5.306, 5.691, 5.395, 6.017, 7.353, 5.798, 5.57
+median: 5.691 ms
 
 === From the app as agent ava.agent@example.com (API request, RLS applies) ===
 API count result: 7220
-Aggregate  (cost=1874.73..1874.75 rows=1 width=144) (actual time=6.618..6.621 rows=1 loops=1)
+Aggregate  (cost=1874.75..1874.77 rows=1 width=144) (actual time=6.528..6.530 rows=1 loops=1)
   Buffers: shared hit=1122
   InitPlan 3
-    ->  Aggregate  (cost=1873.91..1873.92 rows=1 width=8) (actual time=6.425..6.426 rows=1 loops=1)
+    ->  Aggregate  (cost=1873.93..1873.94 rows=1 width=8) (actual time=6.347..6.348 rows=1 loops=1)
           Buffers: shared hit=1117
           InitPlan 1
-            ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.010..0.011 rows=1 loops=1)
+            ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.009..0.010 rows=1 loops=1)
           InitPlan 2
-            ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.107..0.107 rows=1 loops=1)
+            ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.103..0.104 rows=1 loops=1)
                   Buffers: shared hit=3
-          ->  Seq Scan on tickets tickets_1  (cost=0.00..1864.60 rows=3606 width=0) (actual time=0.123..6.126 rows=7220 loops=1)
+          ->  Seq Scan on tickets tickets_1  (cost=0.00..1864.60 rows=3614 width=0) (actual time=0.118..6.057 rows=7220 loops=1)
                 Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (category = 'billing'::text))
                 Rows Removed by Filter: 42820
                 Buffers: shared hit=1117
-  ->  Limit  (cost=0.29..0.81 rows=1 width=8) (actual time=0.183..0.185 rows=1 loops=1)
+  ->  Limit  (cost=0.29..0.81 rows=1 width=8) (actual time=0.170..0.171 rows=1 loops=1)
         Buffers: shared hit=5
         InitPlan 4
-          ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.018..0.019 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.018..0.018 rows=1 loops=1)
         InitPlan 5
-          ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.152..0.153 rows=1 loops=1)
+          ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.141..0.141 rows=1 loops=1)
                 Buffers: shared hit=3
-        ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3606 width=8) (actual time=0.182..0.182 rows=1 loops=1)
+        ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3614 width=8) (actual time=0.169..0.169 rows=1 loops=1)
               Filter: (((customer_id = (InitPlan 4).col1) OR (InitPlan 5).col1) AND (category = 'billing'::text))
               Rows Removed by Filter: 5
               Buffers: shared hit=5
-Planning Time: 0.322 ms
-Execution Time: 6.672 ms
+Planning Time: 0.191 ms
+Execution Time: 6.616 ms
 
-Execution Time over 7 runs (ms): 6.672, 6.818, 6.214, 6.614, 6.192, 5.981, 6.348
-median: 6.348 ms
+Execution Time over 7 runs (ms): 6.616, 7.175, 8.323, 7.679, 6.251, 6.297, 6.254
+median: 6.616 ms
 
 === Policy on public.tickets for SELECT (pg_policies) ===
 tickets: customers read own, agents read all
@@ -236,56 +237,56 @@ $ node lab/common/by-hand.mjs lab/04-slow-policy/by-hand.sql --runs 7
 by hand: lab/04-slow-policy/by-hand.sql (via http://127.0.0.1:54323, Studio's SQL endpoint, role postgres)
 
 --- Step 1: the count as the table owner (the SQL editor's default; RLS bypassed)
-Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=6.258..6.259 rows=1 loops=1)
+Aggregate  (cost=1757.55..1757.56 rows=1 width=8) (actual time=6.697..6.698 rows=1 loops=1)
   Buffers: shared hit=1114
-  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.010..5.973 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7220 width=0) (actual time=0.007..6.371 rows=7220 loops=1)
         Filter: (category = 'billing'::text)
         Rows Removed by Filter: 42820
         Buffers: shared hit=1114
 Planning:
-  Buffers: shared hit=121
-Planning Time: 0.304 ms
-Execution Time: 6.416 ms
-Execution Time over 7 runs after 1 warm-up (ms): 6.416, 6.375, 6.618, 6.479, 6.202, 6.11, 5.985
-median: 6.375 ms
+  Buffers: shared hit=120
+Planning Time: 0.326 ms
+Execution Time: 6.810 ms
+Execution Time over 7 runs after 1 warm-up (ms): 6.81, 6.565, 7.559, 6.145, 6.511, 7.147, 6.685
+median: 6.685 ms
 
 --- Step 2: the same count as ava.agent@example.com (agent), with minimal JWT claims
-Aggregate  (cost=1873.91..1873.92 rows=1 width=8) (actual time=12.013..12.015 rows=1 loops=1)
+Aggregate  (cost=1873.93..1873.94 rows=1 width=8) (actual time=9.495..9.497 rows=1 loops=1)
   Buffers: shared hit=1175
   InitPlan 1
-    ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.012..0.012 rows=1 loops=1)
+    ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.014..0.015 rows=1 loops=1)
   InitPlan 2
-    ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.629..0.629 rows=1 loops=1)
+    ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.416..0.416 rows=1 loops=1)
           Buffers: shared hit=61
-  ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3606 width=0) (actual time=0.659..11.537 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3614 width=0) (actual time=0.443..9.132 rows=7220 loops=1)
         Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (category = 'billing'::text))
         Rows Removed by Filter: 42820
         Buffers: shared hit=1175
 Planning:
-  Buffers: shared hit=160
-Planning Time: 0.635 ms
-Execution Time: 12.087 ms
-Execution Time over 7 runs after 1 warm-up (ms): 12.087, 7.447, 7.647, 6.836, 7.368, 7.429, 7.043
-median: 7.429 ms
+  Buffers: shared hit=159
+Planning Time: 0.544 ms
+Execution Time: 9.563 ms
+Execution Time over 7 runs after 1 warm-up (ms): 9.563, 7.986, 8.18, 7.546, 12.148, 10.287, 9.363
+median: 9.363 ms
 
 --- Step 3: the same count with claims the size of a real session token.
-Aggregate  (cost=1873.91..1873.92 rows=1 width=8) (actual time=7.558..7.559 rows=1 loops=1)
+Aggregate  (cost=1873.93..1873.94 rows=1 width=8) (actual time=8.247..8.249 rows=1 loops=1)
   Buffers: shared hit=1175
   InitPlan 1
-    ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.018..0.018 rows=1 loops=1)
+    ->  Result  (cost=0.00..0.03 rows=1 width=16) (actual time=0.018..0.019 rows=1 loops=1)
   InitPlan 2
-    ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.335..0.335 rows=1 loops=1)
+    ->  Result  (cost=0.00..0.26 rows=1 width=1) (actual time=0.350..0.350 rows=1 loops=1)
           Buffers: shared hit=61
-  ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3606 width=0) (actual time=0.361..7.258 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=3614 width=0) (actual time=0.378..7.840 rows=7220 loops=1)
         Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (category = 'billing'::text))
         Rows Removed by Filter: 42820
         Buffers: shared hit=1175
 Planning:
-  Buffers: shared hit=160
-Planning Time: 0.415 ms
-Execution Time: 7.611 ms
-Execution Time over 7 runs after 1 warm-up (ms): 7.611, 7.638, 7.57, 7.66, 7.54, 7.176, 7.877
-median: 7.611 ms
+  Buffers: shared hit=159
+Planning Time: 0.463 ms
+Execution Time: 8.300 ms
+Execution Time over 7 runs after 1 warm-up (ms): 8.3, 15.973, 8.424, 7.854, 9.24, 7.516, 8.171
+median: 8.3 ms
 
 --- Step 4: as the agent, how many times does private.is_agent() run for that one count?
 ┌─────────┬────────────────┐
@@ -307,7 +308,7 @@ $ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab
 /AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
 /AI_WORK/Projects/supabase-support-desk/lab/04-slow-policy/test.sql .................... ok
 All tests successful.
-Files=2, Tests=4,  0 wallclock secs ( 0.01 usr  0.01 sys +  0.02 cusr  0.00 csys =  0.04 CPU)
+Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.02 cusr  0.00 csys =  0.05 CPU)
 Result: PASS
 Connecting to local database...
 psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping

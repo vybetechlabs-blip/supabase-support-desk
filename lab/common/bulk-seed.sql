@@ -31,6 +31,13 @@ from (
 ) x
 join lab_customers c on c.n = x.cn;
 
+-- ANALYZE samples 300 x (largest statistics target) rows. At the default target
+-- (100) that is 30,000 of the 50,040 rows, picked at random, so the planner's
+-- estimates (cost, estimated rows) shifted on every lab run. A target of 200 makes
+-- the sample 60,000 rows, i.e. the whole table, so the estimates are the same on
+-- every run and match TROUBLESHOOTING.md. It also applies to autovacuum's analyze.
+alter table public.tickets alter column status set statistics 200;
+
 analyze public.profiles;
 analyze public.tickets;
 

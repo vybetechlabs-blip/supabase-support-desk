@@ -1,8 +1,8 @@
 1. Seq Scan buffers for scenario 4 step 2, by session and run
-  session A, run 1: Buffers: shared hit=1173
+  session A, run 1: Buffers: shared hit=1175
   session A, run 2: Buffers: shared hit=1117
   session A, run 3: Buffers: shared hit=1117
-  session B (new connection), run 1: Buffers: shared hit=1173
+  session B (new connection), run 1: Buffers: shared hit=1175
   session B (new connection), run 2: Buffers: shared hit=1117
   table heap pages: 1114
 

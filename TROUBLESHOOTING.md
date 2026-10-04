@@ -9,7 +9,7 @@ Each scenario ends with steps you can run yourself in Studio's SQL editor.
 ## How the numbers were measured
 
 Every plan, count and timing below is copied from one recorded run on
-2026-10-04 (`npm run lab -- all`, started 04:31 UTC). The complete logs are in
+2026-10-04 (`npm run lab -- all`, started 09:24 UTC). The complete logs are in
 [`lab/evidence/2026-10-04/`](lab/evidence/2026-10-04/). Each number carries a tag
 saying how it was measured:
 
@@ -20,10 +20,14 @@ saying how it was measured:
 | **(count)** | a row count or function-call count | single run; these do not vary |
 
 Timings depend on the machine (these came from a Windows 11 workstation running
-Docker Desktop 4.93.0 and Postgres 17.11). Expect your timings to differ; plan
-shapes, row counts, call counts and buffer counts should match, with one
-exception explained in scenario 3 (about 55 extra buffers the first time a
-statement runs in a new database session).
+Docker Desktop 4.93.0 and Postgres 17.11) and vary from run to run; one run in
+this recording took 22.81 ms where its neighbours took about 13. Expect your
+timings to differ. Plan shapes, row counts, call counts, buffer counts and the
+planner's estimates should match, with one exception explained in scenario 3
+(about 56 extra buffers the first time a statement runs in a new database
+session). The estimates match because the lab data raises the statistics target
+on `tickets.status` to 200, so `ANALYZE` reads the whole table instead of a
+random 30,000-row sample (see `lab/common/bulk-seed.sql`).
 
 **(API) and (by hand) numbers measure different queries.** The API request
 includes everything PostgREST adds (embedded resources, JSON aggregation, the
@@ -351,22 +355,22 @@ The key nodes of the plan (API) (the nodes for the two embedded names are
 summarised in the comment; they are in the evidence log):
 
 ```
-Aggregate  (cost=8756.67..8756.69 rows=1 width=144) (actual time=12.377..12.382 rows=1 loops=1)
+Aggregate  (cost=8720.77..8720.79 rows=1 width=144) (actual time=12.116..12.120 rows=1 loops=1)
   Buffers: shared hit=3994
-  ->  Limit  (cost=8756.29..8756.42 rows=50 width=125) (actual time=12.157..12.171 rows=50 loops=1)
-        ->  Sort  (cost=8756.00..8759.69 rows=1476 width=125) (actual time=12.156..12.164 rows=50 loops=1)
+  ->  Limit  (cost=8720.40..8720.52 rows=50 width=125) (actual time=11.975..11.984 rows=50 loops=1)
+        ->  Sort  (cost=8720.10..8723.76 rows=1461 width=125) (actual time=11.974..11.980 rows=50 loops=1)
               Sort Method: top-N heapsort  Memory: 44kB
               ...
-                          ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1476 width=93) (actual time=0.183..5.471 rows=2920 loops=1)
+                          ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1461 width=93) (actual time=0.191..5.519 rows=2920 loops=1)
                                 Rows Removed by Filter: 47120
                                 Buffers: shared hit=1117
               ... (customer and assignee name lookups: Buffers: shared hit=2877)
-Planning Time: 0.531 ms
-Execution Time: 12.480 ms
+Planning Time: 0.483 ms
+Execution Time: 12.209 ms
 ```
 
-Execution time (API), 7 runs (ms): 12.48, 13.091, 12.178, 11.551, 11.957, 11.889,
-12.896. **Median 12.178 ms.**
+Execution time (API), 7 runs (ms): 12.209, 13.108, 13.433, 13.817, 12.036, 12.709,
+22.81. **Median 13.108 ms.**
 
 ### Why that points to the cause
 
@@ -378,7 +382,7 @@ Execution time (API), 7 runs (ms): 12.48, 13.091, 12.178, 11.551, 11.957, 11.889
   (the table is 1,114 pages) and 2,877 for the name lookups.
 
 The work grows with the size of the whole table, not with the 50 rows on
-screen, which matches "a little slower every week". 12 ms at 50,040 rows is not
+screen, which matches "a little slower every week". 13 ms at 50,040 rows is not
 slow yet in absolute terms; we did not measure larger tables, so we can only say
 the cost scales with the number of rows scanned.
 
@@ -400,19 +404,19 @@ tooling wraps in a transaction.
 ### After the fix (API)
 
 ```
-Aggregate  (cost=337.18..337.20 rows=1 width=144) (actual time=0.734..0.737 rows=1 loops=1)
+Aggregate  (cost=339.44..339.46 rows=1 width=144) (actual time=0.762..0.765 rows=1 loops=1)
   Buffers: shared hit=206
-  ->  Limit  (cost=1.86..336.93 rows=50 width=125) (actual time=0.294..0.577 rows=50 loops=1)
+  ->  Limit  (cost=1.86..339.19 rows=50 width=125) (actual time=0.318..0.614 rows=50 loops=1)
         ...
-                    ->  Index Scan using tickets_status_created_at_idx on tickets  (cost=0.41..3061.60 rows=1479 width=93) (actual time=0.170..0.217 rows=50 loops=1)
+                    ->  Index Scan using tickets_status_created_at_idx on tickets  (cost=0.41..3051.31 rows=1461 width=93) (actual time=0.168..0.214 rows=50 loops=1)
                           Index Cond: (status = 'open'::text)
                           Buffers: shared hit=56
-Planning Time: 0.331 ms
-Execution Time: 0.800 ms
+Planning Time: 0.327 ms
+Execution Time: 0.831 ms
 ```
 
-Execution time (API), 7 runs (ms): 0.8, 0.879, 0.755, 0.698, 0.724, 0.747, 0.76.
-**Median 0.755 ms**, down from 12.178 ms. The scan reads 50 rows instead of
+Execution time (API), 7 runs (ms): 0.831, 1.058, 0.881, 0.696, 0.78, 1.363, 0.766.
+**Median 0.831 ms**, down from 13.108 ms. The scan reads 50 rows instead of
 50,040, the sort is gone, the name lookups run 50 times instead of 2,920, and the
 request touches 206 buffers instead of 3,994.
 
@@ -424,7 +428,7 @@ plan shape, which is stable, rather than a timing, which is not. Before the fix:
 ```
 # Failed test 2: "agent list query does not sequentially scan tickets"
 #     Unexpected records:
-#         ("        ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1476 width=61)")
+#         ("        ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1461 width=61)")
 # Failed test 3: "agent list query reads the (status, created_at desc) index"
 ```
 
@@ -444,41 +448,41 @@ Load the broken state: `npx supabase db reset`, then
    the API request above. You should see (by hand):
 
    ```
-   Limit  (cost=1913.92..1914.05 rows=50 width=40) (actual time=7.749..7.757 rows=50 loops=1)
-     Buffers: shared hit=1172
-     ...  (InitPlan for the role check: Buffers: shared hit=55)
-     ->  Sort  (cost=1913.63..1917.32 rows=1476 width=40) (actual time=7.748..7.752 rows=50 loops=1)
+   Limit  (cost=1913.43..1913.55 rows=50 width=40) (actual time=7.306..7.313 rows=50 loops=1)
+     Buffers: shared hit=1173
+     ...  (InitPlan for the role check: Buffers: shared hit=56)
+     ->  Sort  (cost=1913.13..1916.79 rows=1461 width=40) (actual time=7.305..7.308 rows=50 loops=1)
            Sort Method: top-N heapsort  Memory: 31kB
-           ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1476 width=40) (actual time=0.360..7.317 rows=2920 loops=1)
+           ->  Seq Scan on tickets  (cost=0.00..1864.60 rows=1461 width=40) (actual time=0.336..6.885 rows=2920 loops=1)
                  Rows Removed by Filter: 47120
-                 Buffers: shared hit=1169
-   Execution Time: 7.793 ms
+                 Buffers: shared hit=1170
+   Execution Time: 7.350 ms
    ```
 
-   Execution time (by hand), 7 runs (ms): 7.793, 7.166, 12.217, 7.509, 7.533,
-   7.07, 7.115. **Median 7.509 ms.**
+   Execution time (by hand), 7 runs (ms): 7.35, 7.446, 7.085, 8.086, 7.01,
+   9.807, 20.084. **Median 7.446 ms.**
 
-   Why the scan shows 1,169 buffers here and 1,117 in the (API) plan: the table
+   Why the scan shows 1,170 buffers here and 1,117 in the (API) plan: the table
    is 1,114 pages either way. The role check (`(select private.is_agent())`)
    runs once per statement, and the first time it runs in a **new database
-   session**, Postgres reads about 55 pages of system catalog to load metadata
+   session**, Postgres reads about 56 pages of system catalog to load metadata
    into that session's cache; those reads are counted under the scan. The plan
    above came from a request that Studio's endpoint ran in a new session (the
-   InitPlan line shows the 55); the (API) request reused a warm session.
+   InitPlan line shows the 56); the (API) request reused a warm session.
    `lab/common/probes.mjs` shows the effect directly
    ([`probes.log`](lab/evidence/2026-10-04/probes.log)): the same statement read
-   1,173 buffers on its first run in a new session and 1,117 on every repeat.
+   1,175 buffers on its first run in a new session and 1,117 on every repeat.
 3. Apply the fix (`npm run sql -- lab/03-slow-ticket-list/fix.sql`) and run step 2
    again (by hand): `Index Scan using tickets_status_created_at_idx` with
-   `rows=50` and no Sort node, `Buffers: shared hit=109`. Execution time 7 runs
-   (ms): 0.561, 0.656, 0.693, 0.544, 0.549, 0.567, 0.6. **Median 0.567 ms.**
+   `rows=50` and no Sort node, `Buffers: shared hit=110`. Execution time 7 runs
+   (ms): 0.635, 0.62, 0.597, 1.163, 0.599, 0.63, 0.592. **Median 0.62 ms.**
 
 ---
 
 ## 4. "Fast in the SQL editor, slow in the app"
 
 > Our agents' dashboard shows how many billing tickets there are. The same
-> count runs in about 5 ms in the SQL editor but takes around 150 ms in the app.
+> count runs in about 6 ms in the SQL editor but takes around 170 ms in the app.
 > Same data, same query.
 
 ### What we ran (`lab/04-slow-policy/diagnose.mjs`)
@@ -491,33 +495,33 @@ So we ran both and compared.
 As the table owner (role `postgres`, the SQL editor's identity):
 
 ```
-Aggregate  (cost=1757.52..1757.53 rows=1 width=8) (actual time=5.239..5.240 rows=1 loops=1)
+Aggregate  (cost=1757.55..1757.56 rows=1 width=8) (actual time=5.998..6.000 rows=1 loops=1)
   Buffers: shared hit=1114
-  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7206 width=0) (actual time=0.009..4.971 rows=7220 loops=1)
+  ->  Seq Scan on tickets  (cost=0.00..1739.50 rows=7220 width=0) (actual time=0.008..5.677 rows=7220 loops=1)
         Filter: (category = 'billing'::text)
         Rows Removed by Filter: 42820
-Execution Time: 5.264 ms
+Execution Time: 6.023 ms
 ```
 
-7 runs on a direct connection (ms): 5.264, 5.517, 5.972, 5.416, 5.46, 5.588,
-5.389. **Median 5.46 ms.**
+7 runs on a direct connection (ms): 6.023, 6.158, 6.081, 5.421, 5.447, 8.681,
+5.882. **Median 6.023 ms.**
 
 From the app, signed in as an agent, through the API (API)
 (`select('id', { count: 'exact' }).eq('category', 'billing').limit(1)`):
 
 ```
-Aggregate  (cost=15512.97..15512.99 rows=1 width=144) (actual time=159.121..159.122 rows=1 loops=1)
+Aggregate  (cost=15512.97..15512.99 rows=1 width=144) (actual time=169.489..169.490 rows=1 loops=1)
   Buffers: shared hit=22779
-    ->  Aggregate  (cost=15506.52..15506.53 rows=1 width=8) (actual time=158.962..158.963 rows=1 loops=1)
-          ->  Seq Scan on tickets tickets_1  (cost=0.00..15500.50 rows=2407 width=0) (actual time=0.111..157.834 rows=7220 loops=1)
+    ->  Aggregate  (cost=15506.53..15506.54 rows=1 width=8) (actual time=169.275..169.275 rows=1 loops=1)
+          ->  Seq Scan on tickets tickets_1  (cost=0.00..15500.50 rows=2411 width=0) (actual time=0.153..168.159 rows=7220 loops=1)
                 Filter: ((category = 'billing'::text) AND ((customer_id = (COALESCE(NULLIF(current_setting('request.jwt.claim.sub'::text, true), ''::text), ((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text)))::uuid) OR private.is_agent()))
                 Rows Removed by Filter: 42820
   ...
-Execution Time: 159.183 ms
+Execution Time: 169.546 ms
 ```
 
-7 runs (ms): 159.183, 160.756, 146.081, 147.166, 150.391, 150.374, 150.148.
-**Median 150.374 ms**, about 28 times the table owner's 5.46 ms.
+7 runs (ms): 169.546, 151.631, 153.628, 176.137, 159.829, 178.926, 183.237.
+**Median 169.546 ms**, about 28 times the table owner's 6.023 ms.
 
 ### What it showed, and why that points to the policy
 
@@ -561,7 +565,7 @@ Because the claims are parsed on every row, the cost also depends on the size of
 the JWT. A real session token's claims are 460 bytes here (email, app_metadata,
 user_metadata, amr, session_id and more), against 69 bytes for a two-field
 claims object ([`probes.log`](lab/evidence/2026-10-04/probes.log)). The by-hand steps below show the same
-count taking about 86 ms with a two-field claims object and about 151 ms with
+count taking about 98 ms with a two-field claims object and about 170 ms with
 token-sized claims.
 
 ### The fix (`lab/04-slow-policy/fix.sql`)
@@ -585,18 +589,18 @@ row. This is the pattern the Supabase RLS performance guide recommends for
 ### After the fix (API)
 
 ```
-Aggregate  (cost=1874.73..1874.75 rows=1 width=144) (actual time=6.618..6.621 rows=1 loops=1)
+Aggregate  (cost=1874.75..1874.77 rows=1 width=144) (actual time=6.528..6.530 rows=1 loops=1)
   Buffers: shared hit=1122
-    ->  Aggregate  (cost=1873.91..1873.92 rows=1 width=8) (actual time=6.425..6.426 rows=1 loops=1)
-          ->  Seq Scan on tickets tickets_1  (cost=0.00..1864.60 rows=3606 width=0) (actual time=0.123..6.126 rows=7220 loops=1)
+    ->  Aggregate  (cost=1873.93..1873.94 rows=1 width=8) (actual time=6.347..6.348 rows=1 loops=1)
+          ->  Seq Scan on tickets tickets_1  (cost=0.00..1864.60 rows=3614 width=0) (actual time=0.118..6.057 rows=7220 loops=1)
                 Filter: (((customer_id = (InitPlan 1).col1) OR (InitPlan 2).col1) AND (category = 'billing'::text))
                 Rows Removed by Filter: 42820
   ...
-Execution Time: 6.672 ms
+Execution Time: 6.616 ms
 ```
 
-7 runs (ms): 6.672, 6.818, 6.214, 6.614, 6.192, 5.981, 6.348. **Median 6.348 ms**,
-down from 150.374 ms and within 1 ms of the table owner (median 5.356 ms in the
+7 runs (ms): 6.616, 7.175, 8.323, 7.679, 6.251, 6.297, 6.254. **Median 6.616 ms**,
+down from 169.546 ms and within 1 ms of the table owner (median 5.691 ms in the
 same after-fix pass). Buffers: 1,122 instead of 22,779. Call count:
 `{ rows_counted: 7220, is_agent_calls: 1 }` (count).
 
@@ -630,17 +634,17 @@ Load the broken state: `npx supabase db reset`, then
 
 | Step | What it runs | Broken policy (by hand) | After the fix (by hand) |
 |---|---|---|---|
-| 1 | count as the table owner | median **6.308 ms**, 1,114 buffers | median 6.375 ms |
-| 2 | count as the agent, minimal claims (`sub`, `role`) | median **85.943 ms**, 22,831 buffers, `private.is_agent()` in the Filter line | median 7.429 ms, 1,175 buffers, `(InitPlan 2).col1` in the Filter line |
-| 3 | count as the agent, token-sized claims built from the user's row | median **151.015 ms**, 22,831 buffers | median 7.611 ms |
+| 1 | count as the table owner | median **6.438 ms**, 1,114 buffers | median 6.685 ms |
+| 2 | count as the agent, minimal claims (`sub`, `role`) | median **97.73 ms**, 22,831 buffers, `private.is_agent()` in the Filter line | median 9.363 ms, 1,175 buffers, `(InitPlan 2).col1` in the Filter line |
+| 3 | count as the agent, token-sized claims built from the user's row | median **170.408 ms**, 22,831 buffers | median 8.3 ms |
 | 4 | calls to `private.is_agent()` for one count | `is_agent_calls = 7220` (count) | `is_agent_calls = 1` (count) |
 | 5 | the select policy | `((customer_id = auth.uid()) OR private.is_agent())` | `((customer_id = ( SELECT auth.uid() AS uid)) OR ( SELECT private.is_agent() AS is_agent))` |
 
 All 7 runs (ms) for each timed step:
 
-- Step 1 broken: 6.59, 6.263, 6.134, 6.308, 6.381, 6.189, 6.497. After fix: 6.416, 6.375, 6.618, 6.479, 6.202, 6.11, 5.985.
-- Step 2 broken: 85.076, 86.279, 85.747, 88.898, 85.943, 89.213, 85.269. After fix: 12.087, 7.447, 7.647, 6.836, 7.368, 7.429, 7.043.
-- Step 3 broken: 189.519, 148.704, 148.322, 151.015, 156.427, 157.039, 150.194. After fix: 7.611, 7.638, 7.57, 7.66, 7.54, 7.176, 7.877.
+- Step 1 broken: 6.728, 6.373, 6.438, 6.208, 6.336, 7.556, 10.178. After fix: 6.81, 6.565, 7.559, 6.145, 6.511, 7.147, 6.685.
+- Step 2 broken: 97.73, 115.324, 106.564, 96.278, 90.676, 110.081, 88.727. After fix: 9.563, 7.986, 8.18, 7.546, 12.148, 10.287, 9.363.
+- Step 3 broken: 164.32, 186.372, 183.614, 178.214, 158.33, 169.37, 170.408. After fix: 8.3, 15.973, 8.424, 7.854, 9.24, 7.516, 8.171.
 
 Step 3 lands near the (API) number because it matches what the API does:
 token-sized claims, parsed per row. Step 2 is faster only because its claims are
