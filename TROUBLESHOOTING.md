@@ -541,8 +541,10 @@ plan, where the role check shows up as `(InitPlan 2).col1`, a value computed
 once and reused. The buffer count tells the same story: 22,779 buffers for the
 app's request against 1,114 for the table owner, because every row's role check
 looks up the caller in `profiles`. (A fresh-clone run of the same lab recorded
-22,845 here, 66 more; that is consistent with the new-session catalog reads
-described in scenario 3, though we did not check that request's connection.)
+22,845 here, 66 more:
+[`2026-10-04-fresh-clone/04-slow-policy.log`](lab/evidence/2026-10-04-fresh-clone/04-slow-policy.log).
+That is consistent with the new-session catalog reads described in scenario 3,
+though we did not check that request's connection.)
 
 The policy explains why:
 
