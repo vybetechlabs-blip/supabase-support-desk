@@ -60,8 +60,8 @@ by hand: lab/01-policy-leak/by-hand.sql (via http://127.0.0.1:54323, Studio's SQ
 
 ##### TEST (before fix, expected to FAIL)
 $ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/01-policy-leak/test.sql
-/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
-/AI_WORK/Projects/supabase-support-desk/lab/01-policy-leak/test.sql .................... 
+<repo>/supabase/tests/database/000_setup_helpers.sql .. ok
+<repo>/lab/01-policy-leak/test.sql .................... 
 # Failed test 1: "customer reads no internal notes at all"
 #     Unexpected records:
 #         (76)
@@ -74,13 +74,13 @@ Failed 2/3 subtests
 
 Test Summary Report
 -------------------
-/AI_WORK/Projects/supabase-support-desk/lab/01-policy-leak/test.sql                  (Wstat: 0 Tests: 3 Failed: 2)
+<repo>/lab/01-policy-leak/test.sql                  (Wstat: 0 Tests: 3 Failed: 2)
   Failed tests:  1-2
 Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.02 cusr  0.00 csys =  0.05 CPU)
 Result: FAIL
 Connecting to local database...
-psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
-psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  schema "tests" does not exist, skipping
+psql:<repo>/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:<repo>/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  schema "tests" does not exist, skipping
 error running container: exit 1
 (exit 1)
 
@@ -127,14 +127,14 @@ by hand: lab/01-policy-leak/by-hand.sql (via http://127.0.0.1:54323, Studio's SQ
 
 ##### TEST (after fix, expected to PASS)
 $ npx supabase test db --local supabase/tests/database/000_setup_helpers.sql lab/01-policy-leak/test.sql
-/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql .. ok
-/AI_WORK/Projects/supabase-support-desk/lab/01-policy-leak/test.sql .................... ok
+<repo>/supabase/tests/database/000_setup_helpers.sql .. ok
+<repo>/lab/01-policy-leak/test.sql .................... ok
 All tests successful.
 Files=2, Tests=4,  0 wallclock secs ( 0.02 usr  0.00 sys +  0.02 cusr  0.00 csys =  0.04 CPU)
 Result: PASS
 Connecting to local database...
-psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
-psql:/AI_WORK/Projects/supabase-support-desk/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  drop cascades to 4 other objects
+psql:<repo>/supabase/tests/database/000_setup_helpers.sql:8: NOTICE:  extension "pgtap" already exists, skipping
+psql:<repo>/supabase/tests/database/000_setup_helpers.sql:10: NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function tests.create_user(text,text,text)
 drop cascades to function tests.uid(text)
 drop cascades to function tests.authenticate_as(text)
