@@ -1,18 +1,15 @@
 # Supabase Support Desk
 
-A small support desk built on Supabase. Customers file tickets and reply on them;
-agents see every ticket, filter, assign, reply, add internal notes and resolve.
-Every new ticket is triaged by an Edge Function that stores an embedding and
-classifies it, and the agent view suggests similar resolved tickets with their
-resolutions. Row level security decides who sees what, everywhere: the Data API,
-Realtime and the similar-ticket search.
+[![CI](https://github.com/vybetechlabs-blip/supabase-support-desk/actions/workflows/ci.yml/badge.svg)](https://github.com/vybetechlabs-blip/supabase-support-desk/actions/workflows/ci.yml)
 
-[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) is the other half of the project: four
-reproducible Supabase problems (two row level security bugs, two performance
-problems), each with the diagnosis, a fix migration and a test that fails before
-the fix and passes after.
+A small support desk built on Supabase, with a troubleshooting lab that reproduces four Supabase problems and fixes each one.
 
-Built with Claude Code; the troubleshooting write-ups were verified by hand.
+## Problem and result
+Row level security is easy to get subtly wrong, and the failures look like something else: a customer who can read internal notes, a 403 on a reply that should work, a ticket list that slows down a little every week, and a count that is fast in the SQL editor and slow in the app.
+
+In one recorded run on 2026-10-04, on a Windows 11 machine with 50,000 extra tickets loaded, the agent ticket list went from a median 13.1 ms to 0.8 ms once an index matched its query. A count that took a median 169.5 ms through the API, against 6.0 ms in the SQL editor, took 6.6 ms after the role check was wrapped in a sub-select. The database suite has 96 pgTAP assertions in 9 files, and 10 unit tests cover the classifier.
+
+This repo is a support desk where customers file tickets and agents work them. Row level security decides who sees what, in the Data API, in Realtime and in the similar-ticket search. An Edge Function triages every new ticket by storing an embedding and, when a key is set, a category and priority. [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) is the other half of the project: it breaks the desk four ways, two row level security bugs and two performance problems, and for each one gives the diagnosis, a fix migration and a test that fails before the fix and passes after.
 
 ## Screenshots
 
@@ -34,6 +31,8 @@ Similar resolved tickets panel lists earlier tickets with their resolutions.
 
 ## Contents
 
+- [Decision log](#decision-log)
+- [How AI was used](#how-ai-was-used)
 - [Requirements](#requirements)
 - [Setup from a fresh clone](#setup-from-a-fresh-clone)
 - [Walkthrough](#walkthrough)
@@ -44,6 +43,49 @@ Similar resolved tickets panel lists earlier tickets with their resolutions.
 - [Commands](#commands)
 - [Project layout](#project-layout)
 - [Limitations](#limitations)
+- [License](#license)
+- [Status](#status)
+
+## Decision log
+**1. Row level security on every table, with the role check wrapped in a sub-select.**
+Chosen: every table has a policy for select, insert, update and delete, and operations that no client may perform get an explicit `false` policy, so the intent is visible in `pg_policies` and covered by a test. Policies call `private.is_agent()`, a `SECURITY DEFINER` function in a schema the API does not expose, wrapped as `(select private.is_agent())` so Postgres runs it once per statement. A test fails if any policy calls it, or `auth.uid()`, without the wrapper.
+Rejected: a role claim in the JWT, set by a custom access token hook. The claim only changes when the token refreshes, so a demoted agent would keep agent access until then. A table lookup cached per statement is current on every query and needs no hook.
+Known limits: the wrapper is easy to forget, and scenario 4 of the lab shows what that costs: a median 169.5 ms against 6.6 ms for the same count. Agents can edit any ticket column through the API, including the triage fields; only the assignee is checked.
+
+**2. The server sets timestamps on API inserts.**
+Chosen: a `BEFORE INSERT` trigger overwrites `created_at`, and `updated_at` on tickets, with `now()` when the role is `anon` or `authenticated`. Without it a client could future-date a ticket to the top of the agent list, which sorts by `created_at`, or backdate a reply.
+Known limits: the table owner can still write historical values, which the seed data, the lab and the migrations rely on.
+
+**3. The browser holds the publishable key only.**
+Chosen: every request runs as `anon` or `authenticated`, so row level security applies. `src/lib/supabase.ts` refuses to start if the key variable holds a secret key. The secret key is used only inside the Edge Function, where the platform injects it.
+
+**4. Similar tickets come from a function that runs with the caller's rights.**
+Chosen: `public.similar_tickets` is `SECURITY INVOKER`, so the tickets policies apply to the source ticket and to every candidate. Agents get matches from all resolved tickets and a customer only from their own. Results are ranked by inner product, which equals cosine similarity for the normalized `gte-small` vectors.
+Known limits: there is no vector index. An exact scan is fast and correct at this size, and an HNSW index would be the next step for a large table. `gte-small` handles English only and reads at most 512 tokens, and no cut-off is applied, so a ticket with no real precedent still gets three suggestions.
+
+**5. Triage always stores an embedding, and classifies only what is empty and only with a key.**
+Chosen: the Edge Function stores a 384-dimension embedding from the `gte-small` model built into Supabase Edge Functions, which needs no key. With `ANTHROPIC_API_KEY` set it also asks Claude Haiku 4.5 for a category and a priority, fills only the fields that are still empty, and makes no model call when both are set. Without a key there is no keyword-based guess. The outcome (`classified`, `no_key`, `failed` or `skipped`) is stored on the ticket, and `triaged_at` is set on every run, which limits a customer to one run per ticket. Classification lives in `classify.ts` with the model client passed in, so its failure handling is unit-tested with fake clients.
+Known limits: nothing retries automatically, so a ticket triaged during an outage keeps empty fields until Re-run triage is pressed. There is no rate limit on classifier calls: with a key set, every new ticket costs one model call, triggered from the customer's browser. Priority is a suggestion made from customer-written text.
+
+**6. Sign-up always creates a customer.**
+Chosen: a trigger creates the profile at sign-up as a customer and never reads the role from user-supplied metadata. A display name over 100 characters is cut to 100 instead of failing the whole sign-up.
+Known limits: the only way to get the agent role is an update to `profiles` in the database.
+
+**7. The demo product has an invented name.**
+Chosen: the fictional product in the seed data and in the classifier prompt is Brannoway, and a unit test asserts that the prompt uses it.
+Rejected: Tallybook, which is a real expense-tracking app.
+
+**8. Each lab fix is proved by a test that fails first, and the logs are committed.**
+Chosen: every scenario resets the local database, reproduces the problem, gathers evidence, requires its test to fail, applies the fix and requires the test to pass. The tests check plan shapes or call counts, not timings, so they give the same answer on any machine. The logs of the recorded run are committed under `lab/evidence/`, and every number in `TROUBLESHOOTING.md` is tagged by how it was measured. The lab raises the statistics target on `tickets.status`, so `ANALYZE` reads the whole table.
+Rejected: the default `ANALYZE` sample. It read 30,000 random rows of 50,040, and the planner estimates differed between runs.
+Known limits: timings depend on the machine and vary from run to run. The first statement in a new database session reads 55 to 58 extra catalog pages, so a buffer figure can differ by a page or two.
+
+**9. The project runs on the local stack, and CI covers what runs without Docker.**
+Chosen: the app, the pgTAP suite and the lab run on the local Supabase stack, and the project has not been deployed to a hosted Supabase project. The seed writes directly into `auth.users` and `auth.identities`, with the CLI pinned to 2.119.0. CI runs `npm install`, the build, the linter and the classifier unit tests on Node 24.
+Known limits: the pgTAP suite and the lab need Docker, so CI does not run them. A later Auth schema change could break the seed.
+
+## How AI was used
+_Placeholder. The repository author writes this section._
 
 ## Requirements
 
@@ -232,6 +274,8 @@ Agents see a **Triage** box on each ticket: when triage ran, its recorded outcom
 and a **Run triage** / **Re-run triage** button. Only agents can re-run it; for
 customers the function returns 403.
 
+The two observations below were recorded on the local stack on 2026-10-04 and are not committed as logs. Reproducing them needs an Anthropic API key setting: a valid key for the first, and a deliberately invalid one for the failure case, which `npm run check:triage-failure` checks (instructions are at the top of `scripts/check-triage-failure.mjs`).
+
 **With `ANTHROPIC_API_KEY` set** (in `supabase/functions/.env`, then restart the
 local stack), a new ticket arrives classified. Observed on the local stack on
 2026-10-04:
@@ -312,6 +356,8 @@ npm run test:unit
 Unit tests (10) for the classification step: failure handling, the outcome
 mapping and the skip rule (no stack needed).
 
+CI runs `npm install`, `npm run build`, `npm run lint` and `npm run test:unit` on Node 24 for every push to `main` and every pull request. The pgTAP suite and the lab need the local stack, so CI does not run them.
+
 `npm run check:triage-failure` is the full-path check described under
 [Ticket triage](#ticket-triage).
 
@@ -385,3 +431,9 @@ TROUBLESHOOTING.md           the four write-ups
   could break it.
 - The project runs on the local stack only; it has not been deployed to a hosted
   Supabase project.
+
+## License
+License: MIT, see [LICENSE](LICENSE). All demo data is synthetic: the people and emails are invented, and the addresses use `example.com`.
+
+## Status
+**Status: Complete.** The pgTAP suite and the lab run on the local Supabase stack; CI covers build, lint and unit tests.
