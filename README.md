@@ -78,7 +78,7 @@ Chosen: the app, the pgTAP suite and the lab run on the local Supabase stack, an
 Known limits: the pgTAP suite and the lab need Docker, so CI does not run them. A later Auth schema change could break the seed.
 
 ## How AI was used
-_Placeholder. The repository author writes this section._
+I built this because I had not used Supabase and wanted to learn it by building something with real failure modes, not a tutorial. The shape was mine: a small support desk with customer and agent roles, and a troubleshooting lab where each scenario reproduces a real problem, with a test that fails before the fix and passes after. Claude Code built it in checkpoints with more autonomy than I usually give, since the point was speed; I reviewed at each stop and ran all four lab scenarios myself in Studio before publishing. Two decisions came from the build and I accepted both: the agent-role check runs as a SECURITY DEFINER function called once per statement, with a test that fails if any policy calls it unwrapped, because the naive version evaluated it per row; and the ticket classifier calls a hosted model only when a key is present and falls back to a stub otherwise, so the repo runs without spend. The numbers in TROUBLESHOOTING.md are measured, not estimated, and each is tagged with how it was measured, because the first draft had figures the repo could not reproduce and I asked for them to be cut.
 
 ## Requirements
 - **Node.js.** Developed and tested on Node 24.16. The stated minimum is 22.18
